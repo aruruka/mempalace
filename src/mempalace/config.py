@@ -8,20 +8,19 @@ from pathlib import Path
 DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 RRF_K = 60
 
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-
-
 def resolve_workspace(workspace_arg: str | None) -> Path:
     """Resolve the workspace root.
 
-    Priority: CLI argument > ``MEM_PALACE_WORKSPACE`` env var > repository root.
+    Priority: CLI argument > ``MEM_PALACE_WORKSPACE`` env var > current working
+    directory (the package may be installed anywhere, so a source-tree-derived
+    default is not reliable - agents run from the workspace root).
     """
     if workspace_arg:
         return Path(workspace_arg).resolve()
     env_workspace = os.environ.get("MEM_PALACE_WORKSPACE")
     if env_workspace:
         return Path(env_workspace).resolve()
-    return _REPO_ROOT
+    return Path.cwd()
 
 
 def resolve_db(workspace: Path, db_arg: str | None) -> Path:
@@ -58,3 +57,4 @@ def embed_cache_dir() -> Path:
     if env_cache:
         return Path(env_cache)
     return Path.home() / ".cache" / "fastembed"
+
