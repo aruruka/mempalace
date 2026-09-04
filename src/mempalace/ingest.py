@@ -15,7 +15,7 @@ from pathlib import Path
 
 from mempalace.config import decisions_dir, essence_dir, legacy_duckdb_path
 from mempalace.models import CATEGORY_VALUES, Essence, IngestReport
-from mempalace.storage import rebuild_search_index
+from mempalace.storage import sync_search_index
 
 ADR_FILE_RE = re.compile(r"^(ADR-\d{3})-(.+)\.md$")
 _CATEGORY_LINE_RE = re.compile(
@@ -238,7 +238,7 @@ def ingest_all(conn: sqlite3.Connection, workspace: Path, migrate: bool = True) 
     """Run the full ingest pipeline over a workspace.
 
     Steps: wisdom from essences, decisions from ADR files, one-time session/tool
-    migration from the legacy DuckDB, then a full search-index rebuild.
+    migration from the legacy DuckDB, then a diff-based search-index resync.
     """
     wisdom_count = ingest_wisdom(conn, essence_dir(workspace))
     decision_count = ingest_decisions(conn, decisions_dir(workspace))
@@ -251,7 +251,7 @@ def ingest_all(conn: sqlite3.Connection, workspace: Path, migrate: bool = True) 
         if existing_sessions is not None and int(existing_sessions[0]) == 0:
             session_count, tool_count = migrate_sessions_tools(conn, duckdb_path)
 
-    indexed = rebuild_search_index(conn)
+    indexed = sync_search_index(conn)
     return IngestReport(
         wisdom_upserted=wisdom_count,
         decision_upserted=decision_count,

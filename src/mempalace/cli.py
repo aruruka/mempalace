@@ -88,7 +88,7 @@ def sync(
             (session_id, summary, tags_to_json(tag_list)),
         )
         conn.commit()
-        indexed = storage.rebuild_search_index(conn)
+        indexed = storage.sync_search_index(conn)
     finally:
         conn.close()
     _emit({"session_id": session_id, "docs_indexed": indexed})
@@ -187,7 +187,7 @@ def register_tools(
             )
             added += 1
         conn.commit()
-        indexed = storage.rebuild_search_index(conn)
+        indexed = storage.sync_search_index(conn)
     finally:
         conn.close()
     _emit({"discovered": len(found), "inserted": added, "docs_indexed": indexed})
@@ -203,7 +203,7 @@ def register_decisions(
     _, conn = _open_db(db, workspace)
     try:
         count = ingest_mod.ingest_decisions(conn, config.decisions_dir(ws))
-        indexed = storage.rebuild_search_index(conn)
+        indexed = storage.sync_search_index(conn)
     finally:
         conn.close()
     _emit({"decisions_upserted": count, "docs_indexed": indexed})

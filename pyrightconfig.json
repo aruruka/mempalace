@@ -1,4 +1,7 @@
 {
+  // pyright 1.1.409 does NOT honor 'overrides' (neither from pyproject.toml nor
+  // pyrightconfig.json). Directory relaxations are done per file with a top-of-file
+  // '# pyright: basic' directive (see legacy tools/scripts/tests files); src/ stays strict.
   "pythonVersion": "3.13",
   "typeCheckingMode": "strict",
   "reportMissingImports": true,
@@ -6,8 +9,5 @@
   "reportGeneralTypeIssues": true,
   "reportPrivateUsage": true,
   "extraPaths": ["src"],
-  "exclude": ["**/node_modules", "**/__pycache__", ".venv"],
-  "note": "pyright 1.1.409 does NOT honor 'overrides' (neither from pyproject.toml nor
-          pyrightconfig.json). Directory relaxations are done per file with a top-of-file
-          '# pyright: basic' directive (see legacy tools/scripts/tests files); src/ stays strict."
+  "exclude": ["**/node_modules", "**/__pycache__", ".venv"]
 }

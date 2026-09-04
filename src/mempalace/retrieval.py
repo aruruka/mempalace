@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from dataclasses import dataclass
+from typing import Any, cast
 
 import numpy as np
 
@@ -300,10 +301,13 @@ def _dense_scores(conn: sqlite3.Connection, embedder: Embedder, query: str) -> d
     doc_ids, matrix = _vector_arrays(conn)
     if not doc_ids:
         raise EmbeddingError("no stored vectors; run 'mempalace embed'")
-    query_norm = query_vector / (np.linalg.norm(query_vector) + 1e-9)
-    row_norms = np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9
-    similarities = (matrix / row_norms) @ query_norm
-    return dict(zip(doc_ids, (float(value) for value in similarities), strict=False))
+    # Cast numpy's Any-typed results at the boundary so the strict checker sees
+    # concrete types; the runtime values are unchanged (L2-normalized cosine).
+    q_norm = float(cast(Any, np.linalg.norm(query_vector))) + 1e-9
+    query_norm = query_vector / q_norm
+    row_norms = cast(np.ndarray, np.linalg.norm(matrix, axis=1, keepdims=True)) + 1e-9
+    similarities = cast(np.ndarray, (matrix / row_norms) @ query_norm)
+    return dict(zip(doc_ids, (float(value) for value in similarities.tolist()), strict=False))
 
 
 def search_dense(

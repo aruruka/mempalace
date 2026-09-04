@@ -3,4 +3,4 @@
 Supersedes the ILIKE-only DuckDB MemPalace (ADR-002 → ADR-009).
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"

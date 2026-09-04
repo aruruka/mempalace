@@ -8,6 +8,7 @@ from pathlib import Path
 DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 RRF_K = 60
 
+
 def resolve_workspace(workspace_arg: str | None) -> Path:
     """Resolve the workspace root.
 
@@ -57,4 +58,3 @@ def embed_cache_dir() -> Path:
     if env_cache:
         return Path(env_cache)
     return Path.home() / ".cache" / "fastembed"
-

@@ -1,9 +1,13 @@
-"""SQLite storage layer: schema, connection helper, index rebuild.
+"""SQLite storage layer: schema, connection helper, search-index sync.
 
 The DB is a *derived* index: wisdom and decision rows come from source files
 (MemPalace essences and ADR files), sessions and the tool registry are migrated
-from the legacy DuckDB store. ``search_docs`` + ``search_docs_fts`` form the
-unified, BM25-rankable search surface consumed by the retrieval layer.
+from the legacy DuckDB store. ``search_docs`` holds the canonical text of every
+searchable document and ``search_docs_fts`` is its FTS5 mirror (sharing rowids,
+porter-tokenized) -- together they form the unified, BM25-rankable search
+surface consumed by the retrieval layer. :func:`sync_search_index` reconciles
+that surface from the four source tables as a per-document *diff*, so unchanged
+documents keep their ``doc_id`` and stored embeddings.
 """
 
 from __future__ import annotations
@@ -65,9 +69,9 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
 def init_db(conn: sqlite3.Connection) -> None:
     """Create all MemPalace v2 tables and the FTS5 index if missing (idempotent)."""
     conn.executescript(_SCHEMA)
-    # search_docs and its FTS5 twin are created separately so the FTS table
-    # references the real rowids (external-content FTS5 with triggers is overkill
-    # at this scale; ingest rebuilds both wholesale).
+    # search_docs and its FTS5 twin are separate tables that share rowids
+    # (doc_id). True external-content FTS5 with content= + triggers is overkill
+    # at this scale; sync_search_index reconciles the pair per document instead.
     conn.executescript(
         """
         CREATE TABLE IF NOT EXISTS search_docs (
@@ -146,13 +150,14 @@ def _delete_vec_row(conn: sqlite3.Connection, doc_id: int) -> None:
         return
 
 
-def rebuild_search_index(conn: sqlite3.Connection) -> int:
+def sync_search_index(conn: sqlite3.Connection) -> int:
     """Synchronize the unified search index with the four source tables.
 
-    Documents are keyed by stable identity ``(source_kind, source_ref)``:
-    unchanged documents keep their ``doc_id`` (so their embeddings survive),
-    changed documents are updated in place and their vectors invalidated, new
-    documents are inserted, and stale documents (with their vectors) are removed.
+    This is a per-document *diff*, not a wholesale rebuild: documents are keyed
+    by stable identity ``(source_kind, source_ref)``, unchanged documents keep
+    their ``doc_id`` (so their embeddings survive), changed documents are
+    updated in place and their vectors invalidated, new documents are inserted,
+    and stale documents (with their vectors) are removed.
 
     Returns the number of documents present after the sync.
     """
