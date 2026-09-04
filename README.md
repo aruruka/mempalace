@@ -75,3 +75,16 @@ uv run pyright            # src strict; relaxations are per-file directives (see
 ## License
 
 MIT - see [LICENSE](LICENSE).
+
+## Contribution boundary (consumer workspaces)
+
+mempalace is designed to be **consumed as a dependency** (uv path or git dependency), never edited
+from inside a consumer checkout. If using mempalace in another repository surfaces a bug or a
+missing feature:
+
+1. File an issue at https://github.com/aruruka/mempalace/issues with a repro.
+2. Fixes are developed in this repository and released as tags (e.g. `v0.2.0`).
+3. Consumers update by refreshing their dependency (e.g. `uv sync --reinstall-package mempalace`
+   for a path dependency, or bumping the git tag).
+
+Do **not** patch mempalace code or documentation from the consuming workspace.
