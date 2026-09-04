@@ -1,0 +1,34 @@
+{
+  "core": [
+    {"id": "Q01", "query": "duckdb sequence does not exist when creating table", "targets": ["2026-04-16-duckdb-sequence-pitfall"]},
+    {"id": "Q02", "query": "uv run --with module missing stub in IDE type checker", "targets": ["2026-04-16-uv-with-vs-uv-add-stub-pitfall"]},
+    {"id": "Q03", "query": "query mempalace duckdb directly from the command line", "targets": ["2026-04-17-duckdb-cli-and-dynamic-mcp-memory-rules"]},
+    {"id": "Q04", "query": "hermes update fails file locked winerror 32", "targets": ["2026-08-20-hermes-update-windows-file-locking"]},
+    {"id": "Q05", "query": "file lock when updating hermes agent on windows", "targets": ["2026-08-20-hermes-update-windows-file-locking"]},
+    {"id": "Q06", "query": "npm or npx not found on windows with fnm", "targets": ["2026-04-24-npm-cmd-fnm-preference", "2026-04-24-fnm-background-path-pitfall"]},
+    {"id": "Q07", "query": "hermes desktop model picker shows no custom provider models", "targets": ["2026-08-11-hermes-desktop-model-picker-empty-custom-provider"]},
+    {"id": "Q08", "query": "uv cache rename os error 1 on windows", "targets": ["2026-07-17-uv-cache-dir-rename-failure"]},
+    {"id": "Q09", "query": "how to stop wsl2 vmmem using too much memory", "targets": ["2026-08-10-windows-services-wsl-memory"]},
+    {"id": "Q10", "query": "convert html to pdf when headless browser fails", "targets": ["2026-04-30-pdf-conversion-fallback"]},
+    {"id": "Q11", "query": "ffmpeg dash merge webm vp9 opus invalid argument", "targets": ["2026-07-17-ffmpeg-stripped-muxer-pitfall"]},
+    {"id": "Q12", "query": "winget ffmpeg link not runnable use real package path", "targets": ["2026-07-18-ffmpeg-winget-package-path"]},
+    {"id": "Q13", "query": "gemini vision api key without direnv on windows", "targets": ["2026-08-13-gemini-vision-cli-wsl-api-key"]},
+    {"id": "Q14", "query": "mcp_config.json symlink all clients read the same host config", "targets": ["2026-08-13-mcp-global-config-google-developer-knowledge"]},
+    {"id": "Q15", "query": "pyright possibly unbound variable in try except", "targets": ["2026-04-26-pyright-unbound-variables"]},
+    {"id": "Q16", "query": "type narrowing after assertIsNotNone in unittest", "targets": ["2026-04-26-pyright-narrowing-unittest"]},
+    {"id": "Q17", "query": "why do generated outputs go to artifacts not tools", "targets": ["2026-04-18-tools-output-location-preference"]},
+    {"id": "Q18", "query": "copy files from windows into wsl using unc path", "targets": ["2026-04-17-wsl2-unc-path-access", "2026-04-19-stale-workspace-unc-path"]},
+    {"id": "Q19", "query": "reasonix mcp server silent no response stderr pipe", "targets": ["2026-09-01-reasonix-mcp-server-registration"]},
+    {"id": "Q20", "query": "google drive mcp exposes too many tools need filter", "targets": ["2026-04-24-mcp-tool-filter-patch"]}
+  ],
+  "probes": [
+    {"id": "Q21", "query": "win", "targets": [], "precision": true},
+    {"id": "Q22", "query": "herms update winerror 32", "targets": ["2026-08-20-hermes-update-windows-file-locking"]},
+    {"id": "Q23", "query": "MCP 配置 拓扑 链接 自动生效", "targets": ["2026-08-13-mcp-global-config-google-developer-knowledge"], "retired": true},
+    {"id": "Q24", "query": "agents skills 目录 junction 符号链接", "targets": ["2026-08-06-agent-skill-link-topology"], "retired": true},
+    {"id": "Q25", "query": "powershell alias shadows uv completion", "targets": ["2026-04-29-powershell-uv-alias-shadowing"]},
+    {"id": "Q26", "query": "file naming convention hyphen lowerCamelCase category", "targets": ["2026-07-17-english-semantic-file-naming"]},
+    {"id": "Q27", "query": "elden ring save editor add selected button missing", "targets": ["2026-07-19-saveEditor-addButton-selector-pitfall"]},
+    {"id": "Q28", "query": "gherkin bdd dynamic import numbered scripts quality gates", "targets": ["2026-08-29-parallel-worktree-bdd-and-test-enhancement"]}
+  ]
+}

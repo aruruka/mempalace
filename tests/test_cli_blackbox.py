@@ -1,0 +1,96 @@
+"""Black-box CLI tests: real subprocess invocations of ``python -m mempalace``.
+
+These mirror Go ``testscript`` semantics for Python: the packaged CLI runs as a
+subprocess against a hermetic temp workspace; assertions cover stdout JSON,
+exit codes, and stderr notes.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+HERMES_SLUG = "2026-08-20-hermes-file-locking"
+
+
+def _run(db_path: Path, workspace: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mempalace",
+            *args,
+            "--db",
+            str(db_path),
+            "--workspace",
+            str(workspace),
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        env=env,
+        check=False,
+        timeout=120,
+    )
+
+
+def test_blackbox_ingest_and_search_roundtrip(workspace: Path, db_path: Path) -> None:
+    result = _run(db_path, workspace, ["ingest"])
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["wisdom_upserted"] == 3
+    assert payload["decision_upserted"] == 1
+
+    search = _run(
+        db_path, workspace, ["search", "file lock hermes update", "--mode", "bm25", "--limit", "3"]
+    )
+    assert search.returncode == 0, search.stderr
+    data = json.loads(search.stdout)
+    assert data["mode"] == "bm25"
+    assert data["hits"]
+    assert data["hits"][0]["source_ref"] == HERMES_SLUG
+
+
+def test_blackbox_invalid_mode_exits_nonzero(workspace: Path, db_path: Path) -> None:
+    _run(db_path, workspace, ["ingest"])
+    result = _run(db_path, workspace, ["search", "anything", "--mode", "banana"])
+    assert result.returncode != 0
+
+
+def test_blackbox_sync_then_find_session(workspace: Path, db_path: Path) -> None:
+    _run(db_path, workspace, ["ingest"])
+    sync = _run(
+        db_path,
+        workspace,
+        [
+            "sync",
+            "--id",
+            "demo-session-2026",
+            "--summary",
+            "probe cache token",
+            "--tags",
+            "demo,probe",
+        ],
+    )
+    assert sync.returncode == 0, sync.stderr
+
+    search = _run(
+        db_path, workspace, ["search", "probe cache token", "--mode", "bm25", "--limit", "3"]
+    )
+    assert search.returncode == 0, search.stderr
+    data = json.loads(search.stdout)
+    refs = [hit["source_ref"] for hit in data["hits"]]
+    assert "demo-session-2026" in refs
+
+
+def test_blackbox_reconcile_reports_zero_drift(workspace: Path, db_path: Path) -> None:
+    _run(db_path, workspace, ["ingest"])
+    result = _run(db_path, workspace, ["reconcile"])
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["files_without_row"] == []
+    assert payload["rows_without_file"] == []
