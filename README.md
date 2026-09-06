@@ -60,21 +60,22 @@ Optional extras: `vec` (sqlite-vec), `legacy` (duckdb).
 uv run mempalace --help
 uv run python -m mempalace doctor         # environment & database health diagnostics
 uv run python -m mempalace init-workspace # interactive workspace onboarding wizard (alias: setup)
+uv run python -m mempalace list           # list all essences, categories, ADRs & vector coverage (alias: ls)
 uv run python -m mempalace init           # create schema (idempotent)
 uv run python -m mempalace ingest         # derive DB + search index from essence/ADR files
 uv run python -m mempalace embed          # compute embeddings (offline after the first run)
-uv run python -m mempalace search --mode hybrid --limit 5 "file lock hermes"
+uv run python -m mempalace search file lock hermes # multi-token positional search (auto-syncs fresh essences)
 uv run python -m mempalace reconcile      # drift report between files and DB
 uv run python -m mempalace sync --id <session_id> --summary "..." --tags a,b
 ```
 
 ### CLI subcommands
 
-`doctor`, `init-workspace` (alias `setup`), `init`, `ingest`, `sync`, `search` (JSON out;
-`--mode bm25|dense|hybrid`), `reconcile`, `embed`, `register-tools`, `register-decisions`.
+`doctor`, `init-workspace` (alias `setup`), `list` (alias `ls`), `init`, `ingest`, `sync`, `search` (JSON out;
+`--mode bm25|dense|hybrid`, multi-word unquoted args supported), `reconcile`, `embed`, `register-tools`, `register-decisions`.
 
-`search` never embeds automatically: without stored vectors it returns BM25 with a note; run
-`mempalace embed` first for dense/hybrid (`--no-embed` forces BM25).
+`init-workspace` auto-indexes dense vectors upon setup, ensuring hybrid search works immediately. `search` lazily detects
+and reconciles newly added essence files on disk before executing queries.
 
 ## Layout
 

@@ -13,7 +13,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from mempalace import config, ingest, storage
+from mempalace import config, ingest, retrieval, storage
+from mempalace.embeddings import Embedder, EmbeddingError
 
 
 class AgentFlavor(enum.StrEnum):
@@ -123,10 +124,12 @@ Write-Host "`nRunning environment diagnostics..." -ForegroundColor Cyan
 if (Get-Command "mempalace" -ErrorAction SilentlyContinue) {
     mempalace doctor
     mempalace ingest
+    mempalace embed
 } else {
     Write-Host "⚠️ 'mempalace' installed. Running via uv tool run:" -ForegroundColor Yellow
     uv tool run mempalace doctor
     uv tool run mempalace ingest
+    uv tool run mempalace embed
 }
 
 Write-Host "`n✨ MemPalace environment setup complete! Your workspace is ready.`n" `
@@ -168,10 +171,12 @@ echo -e "\\n\\033[1;36mRunning environment diagnostics...\\033[0m"
 if command -v mempalace &> /dev/null; then
     mempalace doctor
     mempalace ingest
+    mempalace embed
 else
     echo -e "\\033[1;33m⚠️ 'mempalace' installed. Running via uv tool run:\\033[0m"
     uv tool run mempalace doctor
     uv tool run mempalace ingest
+    uv tool run mempalace embed
 fi
 
 echo -e "\\n\\033[1;32m✨ MemPalace environment setup complete! Your workspace is ready.\\033[0m\\n"
@@ -405,6 +410,7 @@ class WorkspaceInitializerConfig:
     install_skills: bool = True
     setup_decisions: bool = True
     setup_scripts: bool = True
+    embed: bool = True
     kickoff_file: str | None = "MEMPALACE_KICKOFF.md"
     dry_run: bool = False
 
@@ -419,6 +425,7 @@ class WorkspaceInitializerReport:
     existing_paths: list[str] = field(default_factory=_empty_str_list)
     db_initialized: bool = False
     docs_indexed: int = 0
+    vectors_indexed: int = 0
     kickoff_prompt_path: str = ""
     kickoff_prompt_content: str = ""
 
@@ -506,7 +513,7 @@ def initialize_workspace(cfg: WorkspaceInitializerConfig) -> WorkspaceInitialize
         _write_file(scripts_dir / "setup-mempalace.ps1", _SETUP_PS1_TEMPLATE)
         _write_file(scripts_dir / "setup-mempalace.sh", _SETUP_SH_TEMPLATE)
 
-    # 7. Initialize SQLite DB and run initial ingest
+    # 7. Initialize SQLite DB and run initial ingest + embedding
     db_path = config.resolve_db(ws, None)
     if not cfg.dry_run:
         conn = storage.connect(db_path)
@@ -516,6 +523,12 @@ def initialize_workspace(cfg: WorkspaceInitializerConfig) -> WorkspaceInitialize
             # Perform initial ingest to index the starter essence & ADRs
             ingest_rep = ingest.ingest_all(conn, ws, migrate=False)
             report.docs_indexed = ingest_rep.docs_indexed
+            if cfg.embed:
+                try:
+                    embedder = Embedder()
+                    report.vectors_indexed = retrieval.ensure_vectors(conn, embedder)
+                except EmbeddingError:
+                    report.vectors_indexed = 0
         finally:
             conn.close()
     else:
@@ -532,4 +545,3 @@ def initialize_workspace(cfg: WorkspaceInitializerConfig) -> WorkspaceInitialize
         report.kickoff_prompt_path = str(kickoff_path.relative_to(ws))
 
     return report
-

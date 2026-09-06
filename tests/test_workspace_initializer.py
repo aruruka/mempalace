@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from mempalace import retrieval, storage
 from mempalace.cli import app
+from mempalace.embeddings import Embedder
 from mempalace.initializer import (
     AgentFlavor,
     WorkspaceInitializerConfig,
@@ -80,6 +81,41 @@ def test_initialize_workspace_scaffolding(tmp_path: Path) -> None:
         assert "welcome" in search_res.hits[0].title.lower()
     finally:
         conn.close()
+
+
+def test_initialize_workspace_with_embeddings(tmp_path: Path) -> None:
+    cfg = WorkspaceInitializerConfig(
+        workspace=tmp_path,
+        seed_essences=True,
+        embed=True,
+    )
+    report = initialize_workspace(cfg)
+    assert report.db_initialized
+    assert report.docs_indexed >= 1
+    assert report.vectors_indexed >= 1
+
+    # Verify dense / hybrid retrieval works without fallback warning
+    db_file = tmp_path / "MemPalace" / "memory.sqlite"
+    conn = storage.connect(db_file)
+    try:
+        res = retrieval.search(conn, "welcome", mode="hybrid", embedder=Embedder())
+        assert res.mode == "hybrid"
+        assert res.note is None
+        assert len(res.hits) >= 1
+    finally:
+        conn.close()
+
+
+def test_initialize_workspace_without_embeddings(tmp_path: Path) -> None:
+    cfg = WorkspaceInitializerConfig(
+        workspace=tmp_path,
+        seed_essences=True,
+        embed=False,
+    )
+    report = initialize_workspace(cfg)
+    assert report.db_initialized
+    assert report.docs_indexed >= 1
+    assert report.vectors_indexed == 0
 
 
 def test_initialize_workspace_claude_flavor(tmp_path: Path) -> None:
@@ -177,9 +213,7 @@ def test_cli_init_workspace_invalid_agent(tmp_path: Path, cli_runner: CliRunner)
     assert result.exit_code == 2
 
 
-def test_cli_init_workspace_interactive_simulation(
-    tmp_path: Path, cli_runner: CliRunner
-) -> None:
+def test_cli_init_workspace_interactive_simulation(tmp_path: Path, cli_runner: CliRunner) -> None:
 
     # Simulated answers:
     # 1. Target workspace path: tmp_path
@@ -188,7 +222,8 @@ def test_cli_init_workspace_interactive_simulation(
     # 4. Install skill: y
     # 5. Scaffold decisions: y
     # 6. Generate setup scripts: y
-    user_inputs = f"{tmp_path}\n1\ny\ny\ny\ny\n"
+    # 7. Compute dense embeddings: y
+    user_inputs = f"{tmp_path}\n1\ny\ny\ny\ny\ny\n"
     result = cli_runner.invoke(
         app,
         ["init-workspace", "--human"],
@@ -200,4 +235,3 @@ def test_cli_init_workspace_interactive_simulation(
     assert (tmp_path / "MemPalace" / "memory.sqlite").exists()
     assert (tmp_path / "scripts" / "setup-mempalace.ps1").exists()
     assert (tmp_path / "MEMPALACE_KICKOFF.md").exists()
-

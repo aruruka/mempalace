@@ -35,5 +35,16 @@ Format: `## [YYYY-MM-DD] <action> | <title>`
   - `README.md`: Added 60-second Quickstart hero section with `uvx`, `uv tool install`, and `uv add` commands.
   - `docs/decisions/ADR-010-workspace-initializer.md`: Architectural decision record registered into MemPalace database.
 
+## [2026-09-06] feature-add | CLI Multi-Word Parsing, Auto-Embedding, Lazy Ingest & Memory Discovery
 
+- **Actor**: `agent:antigravity/1.0`
+- **Context**: Implemented 4 core developer experience improvements: multi-word positional search argument parsing, auto-embedding during workspace initialization, lazy auto-reconciliation on search, and `mempalace list` (alias `ls`) memory catalog command.
+- **Artifacts Created / Updated**:
+  - `src/mempalace/cli.py`: Updated `search` with `list[str]` keyword parsing and lazy auto-ingest; added `list` / `ls` commands; added `--embed` flag to `init-workspace`.
+  - `src/mempalace/initializer.py`: Added automatic dense vector generation (`embed=True`) to `initialize_workspace()`; added `mempalace embed` to cross-platform setup scripts (`setup-mempalace.ps1`/`.sh`).
+  - `src/mempalace/ingest.py`: Added `is_stale()` and `ensure_fresh_index()` for seamless drift detection and lazy indexing.
+  - `tests/test_cli_blackbox.py`: Added black-box tests for multi-word unquoted search, `mempalace list --agent`, and `mempalace list --human`.
+  - `tests/test_workspace_initializer.py`: Added tests for auto-embedding initialization and `--no-embed` paths.
+  - `tests/test_retrieval.py`: Added test for lazy auto-sync on search.
+  - `README.md`: Updated CLI subcommands and feature documentation.
 

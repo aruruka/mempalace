@@ -61,6 +61,21 @@ def test_blackbox_invalid_mode_exits_nonzero(workspace: Path, db_path: Path) -> 
     assert result.returncode != 0
 
 
+def test_blackbox_search_multi_word_unquoted_args(workspace: Path, db_path: Path) -> None:
+    _run(db_path, workspace, ["ingest"])
+    # Multiple positional arguments passed without wrapping quotes:
+    # `mempalace search file lock hermes --mode bm25`
+    result = _run(
+        db_path,
+        workspace,
+        ["search", "file", "lock", "hermes", "--mode", "bm25", "--limit", "3"],
+    )
+    assert result.returncode == 0, f"STDOUT: {result.stdout}\nSTDERR: {result.stderr}"
+    data = json.loads(result.stdout)
+    assert len(data["hits"]) >= 1
+    assert data["hits"][0]["source_ref"] == HERMES_SLUG
+
+
 def test_blackbox_sync_then_find_session(workspace: Path, db_path: Path) -> None:
     _run(db_path, workspace, ["ingest"])
     sync = _run(
@@ -119,4 +134,24 @@ def test_blackbox_init_workspace_subprocess(tmp_path: Path) -> None:
     assert proc.returncode == 0, proc.stderr
     payload = json.loads(proc.stdout)
     assert payload["agent_flavor"] == "antigravity"
+    assert payload["vectors_indexed"] >= 1
     assert (target / "MEMPALACE_KICKOFF.md").exists()
+
+
+def test_blackbox_list_memories_agent(workspace: Path, db_path: Path) -> None:
+    _run(db_path, workspace, ["ingest"])
+    result = _run(db_path, workspace, ["list", "--agent"])
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert "essences" in data
+    assert "decisions" in data
+    assert len(data["essences"]) >= 3
+    assert len(data["decisions"]) >= 1
+    assert any(e["slug"] == HERMES_SLUG for e in data["essences"])
+
+
+def test_blackbox_list_memories_human(workspace: Path, db_path: Path) -> None:
+    _run(db_path, workspace, ["ingest"])
+    result = _run(db_path, workspace, ["list", "--human"])
+    assert result.returncode == 0, result.stderr
+    assert "MemPalace Memory Catalog" in result.stdout or "Essences" in result.stdout

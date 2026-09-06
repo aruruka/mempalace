@@ -298,3 +298,32 @@ def test_vec_knn_parity_with_numpy(tmp_path: Path) -> None:
         assert abs(knn[2] - _cos(query, far)) < 0.02
     finally:
         conn.close()
+
+
+def test_search_auto_syncs_new_essence(tmp_path: Path) -> None:
+    import json
+
+    from typer.testing import CliRunner
+
+    from mempalace.cli import app
+    from mempalace.initializer import WorkspaceInitializerConfig, initialize_workspace
+
+    runner = CliRunner()
+    # 1. Initialize workspace
+    cfg = WorkspaceInitializerConfig(workspace=tmp_path, embed=False)
+    initialize_workspace(cfg)
+
+    # 2. Add new essence directly to disk without running mempalace ingest
+    new_essence = tmp_path / "MemPalace" / "essences" / "2026-09-06-dynamic-rule.md"
+    new_essence.write_text(
+        "# Dynamic Rule\nCategory: preference\nAlways use strict linting and verification.\n",
+        encoding="utf-8",
+    )
+
+    # 3. Search should automatically detect and return the new essence
+    result = runner.invoke(
+        app, ["search", "dynamic", "rule", "--workspace", str(tmp_path), "--mode", "bm25"]
+    )
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert any(h["source_ref"] == "2026-09-06-dynamic-rule" for h in data["hits"])

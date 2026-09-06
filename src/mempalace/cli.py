@@ -22,7 +22,7 @@ from mempalace import initializer as initializer_mod
 from mempalace import reconcile as reconcile_mod
 from mempalace.embeddings import Embedder
 from mempalace.initializer import WorkspaceInitializerConfig, parse_agent_flavor
-from mempalace.models import tags_to_json
+from mempalace.models import coerce_tags, tags_to_json
 
 app = typer.Typer(
     help="MemPalace v2 — hybrid retrieval memory (SQLite + FTS5 + local embeddings).",
@@ -65,6 +65,7 @@ def _run_init_workspace(
     skills: bool,
     decisions: bool,
     scripts: bool,
+    embed: bool,
     kickoff_file: str,
     interactive: bool | None,
     agent_mode: bool,
@@ -118,6 +119,7 @@ def _run_init_workspace(
         skills_choice = typer.confirm("Install memory-sync skill for agent?", default=skills)
         decisions_choice = typer.confirm("Scaffold docs/decisions for ADRs?", default=decisions)
         scripts_choice = typer.confirm("Generate setup-mempalace scripts?", default=scripts)
+        embed_choice = typer.confirm("Compute dense embeddings for memory?", default=embed)
 
         cfg = WorkspaceInitializerConfig(
             workspace=ws_path,
@@ -126,6 +128,7 @@ def _run_init_workspace(
             install_skills=skills_choice,
             setup_decisions=decisions_choice,
             setup_scripts=scripts_choice,
+            embed=embed_choice,
             kickoff_file=kickoff_file,
             dry_run=dry_run,
         )
@@ -142,7 +145,10 @@ def _run_init_workspace(
             typer.echo("  Existing (preserved):")
             for p in report.existing_paths:
                 typer.echo(f"    = {p}")
-        typer.echo(f"  Database:  Initialized ({report.docs_indexed} docs indexed)")
+        typer.echo(
+            f"  Database:  Initialized "
+            f"({report.docs_indexed} docs, {report.vectors_indexed} vectors)"
+        )
         if report.kickoff_prompt_path:
             typer.echo(f"  Kickoff:   Saved to {report.kickoff_prompt_path}")
 
@@ -174,6 +180,7 @@ def _run_init_workspace(
             install_skills=skills,
             setup_decisions=decisions,
             setup_scripts=scripts,
+            embed=embed,
             kickoff_file=kickoff_file,
             dry_run=dry_run,
         )
@@ -199,6 +206,7 @@ def init_workspace(
     skills: Annotated[bool, typer.Option(help="Install memory-sync skill")] = True,
     decisions: Annotated[bool, typer.Option(help="Scaffold docs/decisions")] = True,
     scripts: Annotated[bool, typer.Option(help="Generate setup-mempalace scripts")] = True,
+    embed: Annotated[bool, typer.Option(help="Compute dense embeddings for memory")] = True,
     kickoff_file: Annotated[
         str, typer.Option(help="File path to save kickoff prompt")
     ] = "MEMPALACE_KICKOFF.md",
@@ -221,6 +229,7 @@ def init_workspace(
         skills=skills,
         decisions=decisions,
         scripts=scripts,
+        embed=embed,
         kickoff_file=kickoff_file,
         interactive=interactive,
         agent_mode=agent_mode,
@@ -247,6 +256,7 @@ def setup(
     skills: Annotated[bool, typer.Option(help="Install memory-sync skill")] = True,
     decisions: Annotated[bool, typer.Option(help="Scaffold docs/decisions")] = True,
     scripts: Annotated[bool, typer.Option(help="Generate setup-mempalace scripts")] = True,
+    embed: Annotated[bool, typer.Option(help="Compute dense embeddings for memory")] = True,
     kickoff_file: Annotated[
         str, typer.Option(help="File path to save kickoff prompt")
     ] = "MEMPALACE_KICKOFF.md",
@@ -269,6 +279,7 @@ def setup(
         skills=skills,
         decisions=decisions,
         scripts=scripts,
+        embed=embed,
         kickoff_file=kickoff_file,
         interactive=interactive,
         agent_mode=agent_mode,
@@ -320,7 +331,10 @@ def sync(
 
 @app.command()
 def search(
-    keywords: Annotated[str, typer.Argument(help="Search terms (space-separated, AND semantics)")],
+    keywords: Annotated[
+        list[str],
+        typer.Argument(help="Search terms (space-separated, AND semantics)"),
+    ],
     mode: Annotated[
         str, typer.Option("--mode", help=f"One of: {', '.join(retrieval.VALID_MODES)}")
     ] = retrieval.MODE_HYBRID,
@@ -337,11 +351,16 @@ def search(
     db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
 ) -> None:
     """Ranked hybrid search over the memory store; emits JSON."""
+    query_text = " ".join(keywords).strip()
+    if not query_text:
+        raise typer.BadParameter("Search keywords cannot be empty")
+    ws = config.resolve_workspace(workspace)
     _, conn = _open_db(db, workspace)
     try:
+        ingest_mod.ensure_fresh_index(conn, ws)
         result = retrieval.search(
             conn,
-            keywords,
+            query_text,
             mode=mode,
             limit=limit,
             source_kind=source,
@@ -431,6 +450,170 @@ def register_decisions(
     finally:
         conn.close()
     _emit({"decisions_upserted": count, "docs_indexed": indexed})
+
+
+def _run_list(
+    category: str | None,
+    agent: bool,
+    human: bool,
+    workspace: str | None,
+    db: str | None,
+) -> None:
+    ws = config.resolve_workspace(workspace)
+    _, conn = _open_db(db, workspace)
+    try:
+        ingest_mod.ensure_fresh_index(conn, ws)
+        # 1. Fetch search_docs vector coverage
+        vec_doc_ids = {
+            int(r["doc_id"]) for r in conn.execute("SELECT doc_id FROM doc_vectors").fetchall()
+        }
+
+        # 2. Fetch wisdom essences
+        wisdom_docs = {
+            str(r["source_ref"]): int(r["doc_id"])
+            for r in conn.execute(
+                "SELECT doc_id, source_ref FROM search_docs WHERE source_kind = 'wisdom'"
+            ).fetchall()
+        }
+        wisdom_sql = "SELECT slug, category, timestamp, source_path FROM wisdom"
+        wisdom_params: list[object] = []
+        if category:
+            wisdom_sql += " WHERE category = ?"
+            wisdom_params.append(category)
+        wisdom_sql += " ORDER BY slug"
+
+        essences: list[dict[str, Any]] = []
+        for r in conn.execute(wisdom_sql, wisdom_params).fetchall():
+            slug = str(r["slug"])
+            doc_id = wisdom_docs.get(slug)
+            has_vec = doc_id is not None and doc_id in vec_doc_ids
+            src_p = r["source_path"]
+            rel_path = ""
+            if src_p:
+                try:
+                    rel_path = str(Path(str(src_p)).relative_to(ws)).replace("\\", "/")
+                except ValueError:
+                    rel_path = str(src_p).replace("\\", "/")
+            essences.append(
+                {
+                    "slug": slug,
+                    "category": r["category"],
+                    "timestamp": r["timestamp"],
+                    "path": rel_path,
+                    "has_vector": has_vec,
+                }
+            )
+
+        # 3. Fetch decisions
+        decisions: list[dict[str, Any]] = []
+        for r in conn.execute(
+            "SELECT id, title, path, status, date, tags FROM decisions ORDER BY id"
+        ).fetchall():
+            tag_list = coerce_tags(r["tags"])
+            dec_path = r["path"]
+            rel_dec_path = ""
+            if dec_path:
+                try:
+                    rel_dec_path = str(Path(str(dec_path)).relative_to(ws)).replace("\\", "/")
+                except ValueError:
+                    rel_dec_path = str(dec_path).replace("\\", "/")
+            decisions.append(
+                {
+                    "id": str(r["id"]),
+                    "title": str(r["title"]),
+                    "status": str(r["status"]),
+                    "date": r["date"],
+                    "tags": tag_list,
+                    "path": rel_dec_path,
+                }
+            )
+
+        session_count = int(conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0])
+        tool_count = int(conn.execute("SELECT COUNT(*) FROM tool_registry").fetchone()[0])
+        total_docs = int(conn.execute("SELECT COUNT(*) FROM search_docs").fetchone()[0])
+    finally:
+        conn.close()
+
+    emit_json = agent or (not human and not sys.stdin.isatty())
+    if emit_json:
+        _emit(
+            {
+                "workspace": str(ws),
+                "essences": essences,
+                "decisions": decisions,
+                "sessions_count": session_count,
+                "tools_count": tool_count,
+                "total_docs": total_docs,
+            }
+        )
+        return
+
+    # Human-friendly rendering
+    typer.secho("\n🏰 MemPalace Memory Catalog\n", fg=typer.colors.CYAN, bold=True)
+    typer.echo(f"  Workspace: {ws}")
+    typer.echo(
+        f"  Total Indexed Documents: {total_docs} "
+        f"(Sessions: {session_count}, Tools: {tool_count})\n"
+    )
+
+    typer.secho(f"🧠 Essences ({len(essences)}):", fg=typer.colors.YELLOW, bold=True)
+    if not essences:
+        typer.echo("  (None found)")
+    else:
+        for e in essences:
+            cat = f"[{e['category'] or 'uncategorized'}]"
+            vec = "⚡ vec" if e["has_vector"] else "  text"
+            typer.echo(f"  • {cat:<15} {e['slug']:<45} ({vec})")
+
+    typer.secho(
+        f"\n📜 Architecture Decisions ({len(decisions)}):", fg=typer.colors.YELLOW, bold=True
+    )
+    if not decisions:
+        typer.echo("  (None found)")
+    else:
+        for d in decisions:
+            status = f"[{d['status']}]"
+            tags_str = f"tags: {', '.join(d['tags'])}" if d["tags"] else ""
+            typer.echo(f"  • {d['id']:<10} {status:<10} {d['title']:<40} {tags_str}")
+    typer.echo("")
+
+
+@app.command(name="list")
+def list_memories(
+    category: Annotated[
+        str | None,
+        typer.Option(help="Filter essences by category (pitfall/preference/thinking_style)"),
+    ] = None,
+    agent: Annotated[
+        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
+    ] = False,
+    human: Annotated[
+        bool, typer.Option("--human", help="Force human-friendly catalog output")
+    ] = False,
+    workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
+    db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
+) -> None:
+    """List all registered wisdom essences, ADRs, and memory catalog status."""
+    _run_list(category=category, agent=agent, human=human, workspace=workspace, db=db)
+
+
+@app.command(name="ls", hidden=True)
+def ls_memories(
+    category: Annotated[
+        str | None,
+        typer.Option(help="Filter essences by category (pitfall/preference/thinking_style)"),
+    ] = None,
+    agent: Annotated[
+        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
+    ] = False,
+    human: Annotated[
+        bool, typer.Option("--human", help="Force human-friendly catalog output")
+    ] = False,
+    workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
+    db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
+) -> None:
+    """Alias for list."""
+    _run_list(category=category, agent=agent, human=human, workspace=workspace, db=db)
 
 
 @app.command()

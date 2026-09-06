@@ -307,3 +307,46 @@ def scan_workspace_tools(workspace: Path) -> list[tuple[str, str, str]]:
             description = ""
         result.append((name, relative, description))
     return result
+
+
+def is_stale(conn: sqlite3.Connection, workspace: Path) -> bool:
+    """Check if the on-disk essences or ADR files differ from the SQLite database."""
+    edir = essence_dir(workspace)
+    ddir = decisions_dir(workspace)
+    if not edir.exists() and not ddir.exists():
+        return False
+
+    essence_files = (
+        [f for f in sorted(edir.glob("*.md")) if f.name.lower() not in ("template.md", "readme.md")]
+        if edir.exists()
+        else []
+    )
+    file_stems = {f.stem for f in essence_files}
+    wisdom_rows = conn.execute("SELECT slug FROM wisdom WHERE source_path IS NOT NULL").fetchall()
+    wisdom_slugs = {str(row["slug"]) for row in wisdom_rows}
+    if file_stems != wisdom_slugs:
+        return True
+
+    decision_files = (
+        [f for f in sorted(ddir.glob("ADR-*.md")) if ADR_FILE_RE.match(f.name)]
+        if ddir.exists()
+        else []
+    )
+    decision_ids_on_disk: set[str] = set()
+    for f in decision_files:
+        m = ADR_FILE_RE.match(f.name)
+        if m:
+            decision_ids_on_disk.add(m.group(1))
+    decision_rows = conn.execute("SELECT id FROM decisions").fetchall()
+    decision_ids = {str(row["id"]) for row in decision_rows}
+    if decision_ids_on_disk != decision_ids:
+        return True
+
+    return False
+
+
+def ensure_fresh_index(conn: sqlite3.Connection, workspace: Path) -> IngestReport | None:
+    """Reconcile on-disk essences and decisions into the database if drift is detected."""
+    if is_stale(conn, workspace):
+        return ingest_all(conn, workspace, migrate=False)
+    return None
