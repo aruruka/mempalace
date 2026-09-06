@@ -16,7 +16,33 @@ Three retrieval layers:
 Design decisions live in `docs/decisions/` (ADR-009 supersedes the original DuckDB approach in
 ADR-002). The golden-recall benchmark measured 1.000 macro recall@5 (hybrid) on its corpus.
 
-## Setup
+## 🚀 Quickstart: Import MemPalace into Your Workspace in 60 Seconds
+
+You can import MemPalace into any existing project using an interactive wizard:
+
+```bash
+# Option 1: Zero-install one-liner via uvx
+uvx --from git+https://github.com/aruruka/mempalace.git mempalace init-workspace
+
+# Option 2: Install as a standalone CLI tool in your environment (Recommended)
+uv tool install git+https://github.com/aruruka/mempalace.git
+mempalace init-workspace
+
+# Option 3: Install as a dev dependency in your project
+uv add --dev "mempalace @ git+https://github.com/aruruka/mempalace.git"
+uv run mempalace init-workspace
+```
+
+The initializer wizard guides you interactively through:
+1. **Scaffolding**: Creates `MemPalace/essences/` and seeds a starter lesson.
+2. **Database Initialization**: Creates the local SQLite database and pre-indexes starter documents.
+3. **Agent Configuration**: Tailors rules for your coding agent (**OpenCode**, **Hermes**, **Antigravity / Gemini**, **Claude Code**, or **Cursor**) and installs the proposal-first `memory-sync` skill.
+4. **Automated Setup Scripts**: Generates `scripts/setup-mempalace.ps1` (Windows PowerShell) and `scripts/setup-mempalace.sh` (POSIX/Bash) to easily bootstrap `uv` and `mempalace` in any developer or agent environment.
+5. **Kick-off Prompt Generation**: Generates a ready-to-use kick-off prompt (`MEMPALACE_KICKOFF.md`) with self-healing instructions and displays it in the terminal.
+
+> **Next step:** Copy the generated Kick-off Prompt and send it to your coding agent. The agent will run `mempalace doctor` to verify memory access and adopt the memory retention protocol!
+
+## Setup (Contributing to Upstream MemPalace)
 
 Requires Python >= 3.13 and [uv](https://docs.astral.sh/uv/).
 
@@ -32,18 +58,20 @@ Optional extras: `vec` (sqlite-vec), `legacy` (duckdb).
 
 ```bash
 uv run mempalace --help
-uv run python -m mempalace init          # create schema (idempotent)
-uv run python -m mempalace ingest        # derive DB + search index from essence/ADR files
-uv run python -m mempalace embed         # compute embeddings (offline after the first run)
+uv run python -m mempalace doctor         # environment & database health diagnostics
+uv run python -m mempalace init-workspace # interactive workspace onboarding wizard (alias: setup)
+uv run python -m mempalace init           # create schema (idempotent)
+uv run python -m mempalace ingest         # derive DB + search index from essence/ADR files
+uv run python -m mempalace embed          # compute embeddings (offline after the first run)
 uv run python -m mempalace search --mode hybrid --limit 5 "file lock hermes"
-uv run python -m mempalace reconcile     # drift report between files and DB
+uv run python -m mempalace reconcile      # drift report between files and DB
 uv run python -m mempalace sync --id <session_id> --summary "..." --tags a,b
 ```
 
 ### CLI subcommands
 
-`init`, `ingest`, `sync`, `search` (JSON out; `--mode bm25|dense|hybrid`), `reconcile`, `embed`,
-`register-tools`, `register-decisions`.
+`doctor`, `init-workspace` (alias `setup`), `init`, `ingest`, `sync`, `search` (JSON out;
+`--mode bm25|dense|hybrid`), `reconcile`, `embed`, `register-tools`, `register-decisions`.
 
 `search` never embeds automatically: without stored vectors it returns BM25 with a note; run
 `mempalace embed` first for dense/hybrid (`--no-embed` forces BM25).

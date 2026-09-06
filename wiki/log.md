@@ -19,3 +19,21 @@ Format: `## [YYYY-MM-DD] <action> | <title>`
   - `docs/decisions/`: ADR governance scaffolding (`template.md`, `README.md`).
   - `MemPalace/essences/`: Dogfooding directory for local memory store.
 
+## [2026-09-06] feature-add | Workspace Initializer & Environment Doctor
+
+- **Actor**: `agent:antigravity/1.0`
+- **Context**: Implemented interactive and AI-native workspace initializer CLI (`init-workspace` / `setup`), environment diagnostics (`mempalace doctor`), cross-platform setup scripts (`setup-mempalace.ps1` / `.sh`), agent adapters, and kick-off prompt generation.
+- **Artifacts Created / Updated**:
+  - `src/mempalace/initializer.py`: Domain logic, AgentFlavor enum, templates, scaffolding, automated setup scripts generation, and prompt synthesis.
+  - `src/mempalace/doctor.py`: System & workspace runtime health diagnostic checks.
+  - `src/mempalace/cli.py`: Added `init-workspace`, `setup`, and `doctor` commands with dual interactive & non-interactive JSON modes.
+  - `tests/features/workspace_initializer.feature`: Gherkin BDD scenarios for workspace onboarding and automated scripts.
+  - `tests/test_bdd_contract.py`: Bound BDD step definitions.
+  - `tests/test_doctor.py`: Diagnostic unit and CLI tests.
+  - `tests/test_workspace_initializer.py`: Unit and CLI functional tests.
+  - `tests/test_cli_blackbox.py`: Subprocess execution test.
+  - `README.md`: Added 60-second Quickstart hero section with `uvx`, `uv tool install`, and `uv add` commands.
+  - `docs/decisions/ADR-010-workspace-initializer.md`: Architectural decision record registered into MemPalace database.
+
+
+

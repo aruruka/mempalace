@@ -94,3 +94,29 @@ def test_blackbox_reconcile_reports_zero_drift(workspace: Path, db_path: Path) -
     payload = json.loads(result.stdout)
     assert payload["files_without_row"] == []
     assert payload["rows_without_file"] == []
+
+
+def test_blackbox_init_workspace_subprocess(tmp_path: Path) -> None:
+    target = tmp_path / "consumer"
+    target.mkdir()
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mempalace",
+            "init-workspace",
+            "--workspace",
+            str(target),
+            "--agent",
+            "--agent-flavor",
+            "antigravity",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["agent_flavor"] == "antigravity"
+    assert (target / "MEMPALACE_KICKOFF.md").exists()

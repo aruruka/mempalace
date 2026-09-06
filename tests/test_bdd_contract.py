@@ -11,9 +11,13 @@ import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
 
 from mempalace import storage
+from mempalace.cli import app
 
 _FEATURE = Path(__file__).with_name("features") / "mempalace.feature"
 scenarios(str(_FEATURE))
+
+_WS_INIT_FEATURE = Path(__file__).with_name("features") / "workspace_initializer.feature"
+scenarios(str(_WS_INIT_FEATURE))
 
 
 @pytest.fixture
@@ -167,3 +171,85 @@ def _then_counts_unchanged(db_path: Path) -> None:
         conn.close()
     assert int(wisdom) == 3
     assert int(decisions) == 1
+
+
+@pytest.fixture
+def target_ws(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return tmp_path_factory.mktemp("target_ws")
+
+
+@given("a clean target workspace directory")
+def _given_clean_ws(target_ws: Path) -> None:
+    assert target_ws.exists()
+
+
+@when(parsers.parse('the CLI initializes the workspace for "{agent}"'))
+def _when_init_ws(cli_runner: Any, target_ws: Path, agent: str) -> None:
+    result = cli_runner.invoke(
+        app,
+        ["init-workspace", "--workspace", str(target_ws), "--agent", "--agent-flavor", agent],
+    )
+    assert result.exit_code == 0, result.output
+
+
+@when(parsers.parse('the CLI initializes the workspace for "{agent}" again'))
+def _when_init_ws_again(cli_runner: Any, target_ws: Path, agent: str) -> None:
+    result = cli_runner.invoke(
+        app,
+        ["init-workspace", "--workspace", str(target_ws), "--agent", "--agent-flavor", agent],
+    )
+    assert result.exit_code == 0, result.output
+
+
+@then("the workspace has a MemPalace essences directory")
+def _then_essences_dir(target_ws: Path) -> None:
+    assert (target_ws / "MemPalace" / "essences").is_dir()
+
+
+@then("the workspace has a starter essence file")
+def _then_starter_essence(target_ws: Path) -> None:
+    essences = list((target_ws / "MemPalace" / "essences").glob("*-welcome-to-mempalace.md"))
+    assert len(essences) == 1
+
+
+@then("the workspace has a memory SQLite database")
+def _then_ws_db(target_ws: Path) -> None:
+    db_file = target_ws / "MemPalace" / "memory.sqlite"
+    assert db_file.exists()
+
+
+@then("the workspace has an AGENTS.md file")
+def _then_agents_md(target_ws: Path) -> None:
+    assert (target_ws / "AGENTS.md").exists()
+
+
+@then("the workspace has a CLAUDE.md file")
+def _then_claude_md(target_ws: Path) -> None:
+    assert (target_ws / "CLAUDE.md").exists()
+
+
+@then("the workspace has a memory-sync skill file")
+def _then_skill_file(target_ws: Path) -> None:
+    assert (target_ws / ".agents" / "skills" / "memory-sync" / "SKILL.md").exists()
+
+
+@then("the workspace has automated setup scripts")
+def _then_setup_scripts(target_ws: Path) -> None:
+    assert (target_ws / "scripts" / "setup-mempalace.ps1").exists()
+    assert (target_ws / "scripts" / "setup-mempalace.sh").exists()
+
+
+@then("the workspace has a kickoff prompt file")
+def _then_kickoff_file(target_ws: Path) -> None:
+    assert (target_ws / "MEMPALACE_KICKOFF.md").exists()
+
+
+@then(parsers.parse('the kickoff prompt references "{needle}"'))
+def _then_kickoff_references(target_ws: Path, needle: str) -> None:
+    content = (target_ws / "MEMPALACE_KICKOFF.md").read_text(encoding="utf-8")
+    assert needle in content
+
+
+@then("the kickoff prompt file still exists")
+def _then_kickoff_still_exists(target_ws: Path) -> None:
+    assert (target_ws / "MEMPALACE_KICKOFF.md").exists()

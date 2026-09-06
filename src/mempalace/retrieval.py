@@ -320,7 +320,7 @@ def search_dense(
 ) -> list[SearchHit]:
     """L2: cosine search over persisted embeddings (never auto-embeds)."""
     if _vector_count(conn) == 0:
-        raise EmbeddingError("no stored vectors; run 'uv run python -m mempalace embed' first")
+        raise EmbeddingError("no stored vectors; run 'mempalace embed' first")
     docs = _fetch_docs(conn, source_kind, category)
     if not docs:
         return []
@@ -400,7 +400,7 @@ def search(
 
     missing = _doc_count(conn) - _vector_count(conn)
     if missing > 0:
-        note = f"{missing} document(s) not embedded yet; run 'uv run python -m mempalace embed'"
+        note = f"{missing} document(s) not embedded yet; run 'mempalace embed'"
     return SearchResult(
         query=query,
         mode=MODE_HYBRID,

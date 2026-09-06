@@ -1,22 +1,27 @@
 """Typer CLI for MemPalace v2.
 
-Subcommands: init, ingest, sync, search, reconcile, embed, register-tools,
-register-decisions. ``search`` emits JSON; the rest emit short summaries.
+Subcommands: init, init-workspace, setup, ingest, sync, search, reconcile,
+embed, register-tools, register-decisions. ``search`` and ``init-workspace --agent``
+emit JSON; the rest emit short summaries.
 """
 
 from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 from typing import Annotated, Any, cast
 
 import typer
 
 from mempalace import config, retrieval, storage
+from mempalace import doctor as doctor_mod
 from mempalace import ingest as ingest_mod
+from mempalace import initializer as initializer_mod
 from mempalace import reconcile as reconcile_mod
 from mempalace.embeddings import Embedder
+from mempalace.initializer import WorkspaceInitializerConfig, parse_agent_flavor
 from mempalace.models import tags_to_json
 
 app = typer.Typer(
@@ -51,6 +56,225 @@ def init(
     db_path, conn = _open_db(db, workspace)
     conn.close()
     typer.echo(f"Initialized MemPalace v2 database at {db_path}")
+
+
+def _run_init_workspace(
+    workspace: str | None,
+    agent: str,
+    seed: bool,
+    skills: bool,
+    decisions: bool,
+    scripts: bool,
+    kickoff_file: str,
+    interactive: bool | None,
+    agent_mode: bool,
+    human: bool,
+    dry_run: bool,
+) -> None:
+    """Core dispatcher for workspace initialization (shared by init-workspace and setup)."""
+    if agent_mode:
+        is_interactive = False
+    elif human:
+        is_interactive = True
+    elif interactive is not None:
+        is_interactive = interactive
+    else:
+        is_interactive = sys.stdin.isatty() and not agent_mode
+
+    if is_interactive:
+        typer.secho("\n🏰 MemPalace v2 — Workspace Initializer\n", fg=typer.colors.CYAN, bold=True)
+        default_ws = str(config.resolve_workspace(workspace))
+        chosen_ws = typer.prompt("Target workspace path", default=default_ws)
+        ws_path = Path(chosen_ws).resolve()
+
+        if not agent:
+            typer.echo("\nSelect your target coding agent:")
+            typer.echo("  1. Antigravity / Gemini CLI")
+            typer.echo("  2. OpenCode")
+            typer.echo("  3. Hermes")
+            typer.echo("  4. Claude Code")
+            typer.echo("  5. Cursor")
+            typer.echo("  6. Generic / Universal")
+            choice = typer.prompt("Choose an agent", default="1")
+            choice_map = {
+                "1": "antigravity",
+                "2": "opencode",
+                "3": "hermes",
+                "4": "claude",
+                "5": "cursor",
+                "6": "generic",
+            }
+            agent_str = choice_map.get(choice.strip(), choice.strip())
+        else:
+            agent_str = agent
+
+        try:
+            flavor = parse_agent_flavor(agent_str)
+        except ValueError as exc:
+            typer.secho(f"Error: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=2) from exc
+
+        seed_choice = typer.confirm("Seed a starter essence file?", default=seed)
+        skills_choice = typer.confirm("Install memory-sync skill for agent?", default=skills)
+        decisions_choice = typer.confirm("Scaffold docs/decisions for ADRs?", default=decisions)
+        scripts_choice = typer.confirm("Generate setup-mempalace scripts?", default=scripts)
+
+        cfg = WorkspaceInitializerConfig(
+            workspace=ws_path,
+            agent_flavor=flavor,
+            seed_essences=seed_choice,
+            install_skills=skills_choice,
+            setup_decisions=decisions_choice,
+            setup_scripts=scripts_choice,
+            kickoff_file=kickoff_file,
+            dry_run=dry_run,
+        )
+        report = initializer_mod.initialize_workspace(cfg)
+
+        typer.secho("\n✨ Workspace initialized successfully!", fg=typer.colors.GREEN, bold=True)
+        typer.echo(f"  Workspace: {report.workspace}")
+        typer.echo(f"  Agent:     {report.agent_flavor}")
+        if report.created_paths:
+            typer.echo("  Created:")
+            for p in report.created_paths:
+                typer.echo(f"    + {p}")
+        if report.existing_paths:
+            typer.echo("  Existing (preserved):")
+            for p in report.existing_paths:
+                typer.echo(f"    = {p}")
+        typer.echo(f"  Database:  Initialized ({report.docs_indexed} docs indexed)")
+        if report.kickoff_prompt_path:
+            typer.echo(f"  Kickoff:   Saved to {report.kickoff_prompt_path}")
+
+        border = "=" * 80
+        typer.secho(f"\n{border}", fg=typer.colors.YELLOW)
+        typer.secho("📋 MEMPALACE KICK-OFF PROMPT", fg=typer.colors.YELLOW, bold=True)
+        typer.secho(
+            "Copy & paste this prompt into your coding agent to activate memory:",
+            fg=typer.colors.WHITE,
+        )
+        typer.secho(border, fg=typer.colors.YELLOW)
+        typer.echo(report.kickoff_prompt_content)
+        typer.secho(border, fg=typer.colors.YELLOW)
+    else:
+        ws_path = config.resolve_workspace(workspace)
+        try:
+            flavor = parse_agent_flavor(agent)
+        except ValueError as exc:
+            typer.echo(
+                json.dumps({"error": True, "code": "INVALID_AGENT", "message": str(exc)}),
+                err=True,
+            )
+            raise typer.Exit(code=2) from exc
+
+        cfg = WorkspaceInitializerConfig(
+            workspace=ws_path,
+            agent_flavor=flavor,
+            seed_essences=seed,
+            install_skills=skills,
+            setup_decisions=decisions,
+            setup_scripts=scripts,
+            kickoff_file=kickoff_file,
+            dry_run=dry_run,
+        )
+        report = initializer_mod.initialize_workspace(cfg)
+        _emit(report.to_dict())
+
+
+@app.command(name="init-workspace")
+def init_workspace(
+    workspace: Annotated[
+        str | None,
+        typer.Option(help="Target workspace root (default: current directory)"),
+    ] = None,
+    agent: Annotated[
+        str,
+        typer.Option(
+            "--agent-flavor",
+            "-a",
+            help="Target agent: opencode, hermes, antigravity, claude, cursor, generic",
+        ),
+    ] = "",
+    seed: Annotated[bool, typer.Option(help="Seed starter essence file")] = True,
+    skills: Annotated[bool, typer.Option(help="Install memory-sync skill")] = True,
+    decisions: Annotated[bool, typer.Option(help="Scaffold docs/decisions")] = True,
+    scripts: Annotated[bool, typer.Option(help="Generate setup-mempalace scripts")] = True,
+    kickoff_file: Annotated[
+        str, typer.Option(help="File path to save kickoff prompt")
+    ] = "MEMPALACE_KICKOFF.md",
+    interactive: Annotated[
+        bool | None, typer.Option(help="Force interactive or non-interactive mode")
+    ] = None,
+    agent_mode: Annotated[
+        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
+    ] = False,
+    human: Annotated[
+        bool, typer.Option("--human", help="Force human-friendly interactive output")
+    ] = False,
+    dry_run: Annotated[bool, typer.Option(help="Preview actions without writing to disk")] = False,
+) -> None:
+    """Interactive & AI-native wizard to initialize a workspace for MemPalace."""
+    _run_init_workspace(
+        workspace=workspace,
+        agent=agent,
+        seed=seed,
+        skills=skills,
+        decisions=decisions,
+        scripts=scripts,
+        kickoff_file=kickoff_file,
+        interactive=interactive,
+        agent_mode=agent_mode,
+        human=human,
+        dry_run=dry_run,
+    )
+
+
+@app.command(name="setup")
+def setup(
+    workspace: Annotated[
+        str | None,
+        typer.Option(help="Target workspace root (default: current directory)"),
+    ] = None,
+    agent: Annotated[
+        str,
+        typer.Option(
+            "--agent-flavor",
+            "-a",
+            help="Target agent: opencode, hermes, antigravity, claude, cursor, generic",
+        ),
+    ] = "",
+    seed: Annotated[bool, typer.Option(help="Seed starter essence file")] = True,
+    skills: Annotated[bool, typer.Option(help="Install memory-sync skill")] = True,
+    decisions: Annotated[bool, typer.Option(help="Scaffold docs/decisions")] = True,
+    scripts: Annotated[bool, typer.Option(help="Generate setup-mempalace scripts")] = True,
+    kickoff_file: Annotated[
+        str, typer.Option(help="File path to save kickoff prompt")
+    ] = "MEMPALACE_KICKOFF.md",
+    interactive: Annotated[
+        bool | None, typer.Option(help="Force interactive or non-interactive mode")
+    ] = None,
+    agent_mode: Annotated[
+        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
+    ] = False,
+    human: Annotated[
+        bool, typer.Option("--human", help="Force human-friendly interactive output")
+    ] = False,
+    dry_run: Annotated[bool, typer.Option(help="Preview actions without writing to disk")] = False,
+) -> None:
+    """Alias for init-workspace."""
+    _run_init_workspace(
+        workspace=workspace,
+        agent=agent,
+        seed=seed,
+        skills=skills,
+        decisions=decisions,
+        scripts=scripts,
+        kickoff_file=kickoff_file,
+        interactive=interactive,
+        agent_mode=agent_mode,
+        human=human,
+        dry_run=dry_run,
+    )
 
 
 @app.command()
@@ -207,6 +431,74 @@ def register_decisions(
     finally:
         conn.close()
     _emit({"decisions_upserted": count, "docs_indexed": indexed})
+
+
+@app.command()
+def doctor(
+    workspace: Annotated[
+        str | None,
+        typer.Option(help="Target workspace root (default: current directory)"),
+    ] = None,
+    agent: Annotated[
+        bool,
+        typer.Option(help="Emit JSON output for AI agents (ai-native-cli)"),
+    ] = False,
+    human: Annotated[
+        bool,
+        typer.Option(help="Force human-friendly checklist output"),
+    ] = False,
+) -> None:
+    """Run environment and workspace health diagnostics."""
+    ws = config.resolve_workspace(workspace)
+    report = doctor_mod.diagnose_environment(ws)
+    emit_json = agent or (not human and not sys.stdin.isatty())
+    if emit_json:
+        _emit(report.to_dict())
+        if not report.all_ok:
+            raise typer.Exit(code=1)
+        return
+
+    typer.secho("\n🩺 MemPalace Environment Diagnostics\n", fg=typer.colors.CYAN, bold=True)
+    typer.echo(f"  Workspace:       {report.workspace}")
+
+    py_icon = "✅" if report.python_ok else "❌"
+    typer.echo(f"  {py_icon} Python Version:  {report.python_version} (required >= 3.13)")
+
+    uv_icon = "✅" if report.uv_installed else "❌"
+    uv_desc = report.uv_path if report.uv_installed else "Not found in PATH"
+    typer.echo(f"  {uv_icon} uv Tool:        {uv_desc}")
+
+    fts5_icon = "✅" if report.sqlite_fts5_ok else "❌"
+    typer.echo(
+        f"  {fts5_icon} SQLite FTS5:     v{report.sqlite_version} "
+        f"(FTS5 enabled: {report.sqlite_fts5_ok})"
+    )
+
+    fe_icon = "✅" if report.fastembed_ok else "❌"
+    typer.echo(f"  {fe_icon} FastEmbed:       {'Available' if report.fastembed_ok else 'Missing'}")
+
+    db_icon = "✅" if report.db_exists else "❌"
+    status_label = "Found" if report.db_exists else "Missing"
+    typer.echo(f"  {db_icon} Database:        {report.db_path} ({status_label})")
+    if report.db_exists:
+        doc_stats = (
+            f"Indexed Docs:  {report.docs_indexed} "
+            f"(Essences: {report.essences_count}, ADRs: {report.decisions_count})"
+        )
+        typer.echo(f"     {doc_stats}")
+        typer.echo(f"     Dense Vectors: {report.vectors_indexed}")
+
+    if report.issues:
+        typer.secho("\n⚠️  Issues Detected:", fg=typer.colors.YELLOW, bold=True)
+        for issue in report.issues:
+            typer.secho(f"  - {issue}", fg=typer.colors.RED)
+        typer.secho("\n💡 Quick Fix:", fg=typer.colors.YELLOW)
+        typer.echo("  Run setup script or 'mempalace init-workspace' to configure the workspace.\n")
+        raise typer.Exit(code=1)
+    else:
+        typer.secho(
+            "\n✨ All environment and workspace checks passed!\n", fg=typer.colors.GREEN, bold=True
+        )
 
 
 def _force_utf8_stdio() -> None:
