@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -269,7 +269,9 @@ def notifier_run() -> dict[str, Any]:
     return {}
 
 
-@given(parsers.parse('a workspace with cached version "{cached_version}" checked {hours:d} hour ago'))
+@given(
+    parsers.parse('a workspace with cached version "{cached_version}" checked {hours:d} hour ago')
+)
 def _given_cached_version(workspace: Path, cached_version: str, hours: int) -> None:
     cache = notifier.UpdateCache(workspace)
     cache.write(cached_version, timestamp=time.time() - (hours * 3600))
@@ -307,9 +309,7 @@ def _given_env_var(monkeypatch: pytest.MonkeyPatch, var_name: str, val: str) -> 
 
 
 @when("I run a mempalace CLI command")
-def _when_run_cli_cmd(
-    cli_runner: CliRunner, workspace: Path, notifier_run: dict[str, Any]
-) -> None:
+def _when_run_cli_cmd(cli_runner: CliRunner, workspace: Path, notifier_run: dict[str, Any]) -> None:
     result = cli_runner.invoke(app, ["list", "--agent", "--workspace", str(workspace)])
     notifier_run["result"] = result
 
@@ -359,4 +359,3 @@ def _then_backs_off(notifier_run: dict[str, Any]) -> None:
 def _then_no_banner(notifier_run: dict[str, Any]) -> None:
     res = notifier_run["result"]
     assert "mempalace update available" not in res.stderr
-

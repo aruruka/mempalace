@@ -171,4 +171,3 @@ def test_blackbox_update_notifier_stderr_banner(workspace: Path, db_path: Path) 
     assert "v9.9.9" in result.stderr
     data = json.loads(result.stdout)
     assert data["wisdom_upserted"] == 3
-

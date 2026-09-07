@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import json
 import time
+import urllib.error
 from pathlib import Path
 from unittest.mock import MagicMock, patch
-import urllib.error
 
 import pytest
 

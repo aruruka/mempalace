@@ -9,12 +9,11 @@ from __future__ import annotations
 import json
 import os
 import re
-from pathlib import Path
 import sys
 import time
-from typing import Any
-import urllib.error
 import urllib.request
+from pathlib import Path
+from typing import Any, cast
 
 GITHUB_REPO = "aruruka/mempalace"
 DEFAULT_TTL_SECONDS = 86400  # 24 hours
@@ -63,9 +62,9 @@ class UpdateCache:
             return None
         try:
             content = self.cache_file.read_text(encoding="utf-8")
-            data = json.loads(content)
+            data: object = json.loads(content)
             if isinstance(data, dict) and "latest_version" in data and "last_checked_at" in data:
-                return data
+                return cast(dict[str, Any], data)
         except Exception:
             return None
         return None
@@ -89,7 +88,9 @@ class UpdateCache:
             # Ignore file system errors silently (e.g. read-only volume)
             pass
 
-    def is_expired(self, cache: dict[str, Any] | None, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> bool:
+    def is_expired(
+        self, cache: dict[str, Any] | None, ttl_seconds: int = DEFAULT_TTL_SECONDS
+    ) -> bool:
         """Check if the cache entry is absent or older than the TTL.
 
         Args:
@@ -209,7 +210,8 @@ def check_and_notify(
 
     if not cache.is_expired(cached_data, ttl_seconds=ttl_seconds):
         assert cached_data is not None
-        latest_ver = cached_data.get("latest_version")
+        raw_ver = cached_data.get("latest_version")
+        latest_ver = str(raw_ver) if raw_ver is not None else None
     else:
         # Cache is missing or expired: perform upstream check
         checker = GitHubVersionChecker()
@@ -218,9 +220,12 @@ def check_and_notify(
             cache.write(latest_ver)
         else:
             # On network or API error, apply back-off so we don't retry on every command
-            old_version = cached_data.get("latest_version") if cached_data else current_version
-            cache.write(old_version, timestamp=time.time() - ttl_seconds + BACKOFF_ON_ERROR_SECONDS)
-            latest_ver = cached_data.get("latest_version") if cached_data else None
+            raw_cached = cached_data.get("latest_version") if cached_data else None
+            fallback_version = str(raw_cached) if raw_cached is not None else current_version
+            cache.write(
+                fallback_version, timestamp=time.time() - ttl_seconds + BACKOFF_ON_ERROR_SECONDS
+            )
+            latest_ver = fallback_version if raw_cached is not None else None
 
     if latest_ver is not None:
         if parse_semver(latest_ver) > parse_semver(current_version):
