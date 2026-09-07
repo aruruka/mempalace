@@ -310,7 +310,7 @@ def _given_env_var(monkeypatch: pytest.MonkeyPatch, var_name: str, val: str) -> 
 def _when_run_cli_cmd(
     cli_runner: CliRunner, workspace: Path, notifier_run: dict[str, Any]
 ) -> None:
-    result = cli_runner.invoke(app, ["doctor", "--workspace", str(workspace)])
+    result = cli_runner.invoke(app, ["list", "--agent", "--workspace", str(workspace)])
     notifier_run["result"] = result
 
 
@@ -325,7 +325,7 @@ def _then_stderr_banner(notifier_run: dict[str, Any], expected_version: str) -> 
 def _then_stdout_clean(notifier_run: dict[str, Any]) -> None:
     res = notifier_run["result"]
     data = json.loads(res.stdout)
-    assert data.get("python_ok") is True
+    assert "essences" in data or "workspace" in data
 
 
 @then(parsers.parse('"{cache_rel_path}" is updated with "{expected_version}"'))

@@ -15,7 +15,7 @@ from typing import Annotated, Any, cast
 
 import typer
 
-from mempalace import config, retrieval, storage
+from mempalace import __version__, config, notifier, retrieval, storage
 from mempalace import doctor as doctor_mod
 from mempalace import ingest as ingest_mod
 from mempalace import initializer as initializer_mod
@@ -38,6 +38,7 @@ def _emit(payload: object) -> None:
 def _open_db(db_arg: str | None, workspace_arg: str | None) -> tuple[Path, sqlite3.Connection]:
     """Resolve workspace/db and open a connection with the schema ensured."""
     workspace = config.resolve_workspace(workspace_arg)
+    notifier.maybe_emit_update_notice(workspace, __version__)
     db_path = config.resolve_db(workspace, db_arg)
     conn = storage.connect(db_path)
     storage.init_db(conn)
@@ -633,6 +634,7 @@ def doctor(
 ) -> None:
     """Run environment and workspace health diagnostics."""
     ws = config.resolve_workspace(workspace)
+    notifier.maybe_emit_update_notice(ws, __version__)
     report = doctor_mod.diagnose_environment(ws)
     emit_json = agent or (not human and not sys.stdin.isatty())
     if emit_json:

@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HERMES_SLUG = "2026-08-20-hermes-file-locking"
@@ -155,3 +156,19 @@ def test_blackbox_list_memories_human(workspace: Path, db_path: Path) -> None:
     result = _run(db_path, workspace, ["list", "--human"])
     assert result.returncode == 0, result.stderr
     assert "MemPalace Memory Catalog" in result.stdout or "Essences" in result.stdout
+
+
+def test_blackbox_update_notifier_stderr_banner(workspace: Path, db_path: Path) -> None:
+    cache_file = workspace / "MemPalace" / ".cache.json"
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(
+        json.dumps({"last_checked_at": time.time(), "latest_version": "9.9.9"}),
+        encoding="utf-8",
+    )
+    result = _run(db_path, workspace, ["ingest"])
+    assert result.returncode == 0, result.stderr
+    assert "mempalace update available: v" in result.stderr
+    assert "v9.9.9" in result.stderr
+    data = json.loads(result.stdout)
+    assert data["wisdom_upserted"] == 3
+
