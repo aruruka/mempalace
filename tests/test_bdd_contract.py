@@ -5,12 +5,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 from typing import Any
 
 import pytest
 from pytest_bdd import given, parsers, scenarios, then, when
+from typer.testing import CliRunner
 
-from mempalace import storage
+from mempalace import notifier, storage
 from mempalace.cli import app
 
 _FEATURE = Path(__file__).with_name("features") / "mempalace.feature"
@@ -18,6 +20,9 @@ scenarios(str(_FEATURE))
 
 _WS_INIT_FEATURE = Path(__file__).with_name("features") / "workspace_initializer.feature"
 scenarios(str(_WS_INIT_FEATURE))
+
+_NOTIFIER_FEATURE = Path(__file__).with_name("features") / "update_notifier.feature"
+scenarios(str(_NOTIFIER_FEATURE))
 
 
 @pytest.fixture
@@ -253,3 +258,105 @@ def _then_kickoff_references(target_ws: Path, needle: str) -> None:
 @then("the kickoff prompt file still exists")
 def _then_kickoff_still_exists(target_ws: Path) -> None:
     assert (target_ws / "MEMPALACE_KICKOFF.md").exists()
+
+
+# ── Upstream Version Update Notifier BDD Steps ─────────────────────────────
+
+
+@pytest.fixture
+def notifier_run() -> dict[str, Any]:
+    """State holder for update notifier BDD scenario runs."""
+    return {}
+
+
+@given(parsers.parse('a workspace with cached version "{cached_version}" checked {hours:d} hour ago'))
+def _given_cached_version(workspace: Path, cached_version: str, hours: int) -> None:
+    cache = notifier.UpdateCache(workspace)
+    cache.write(cached_version, timestamp=time.time() - (hours * 3600))
+
+
+@given("a workspace with no cache or an expired cache")
+@given("a workspace with an expired cache")
+def _given_no_or_expired_cache(workspace: Path) -> None:
+    cache_file = workspace / "MemPalace" / ".cache.json"
+    if cache_file.exists():
+        cache_file.unlink()
+
+
+@given(parsers.parse('upstream GitHub reports latest release "{latest_version}"'))
+def _given_upstream_release(monkeypatch: pytest.MonkeyPatch, latest_version: str) -> None:
+    monkeypatch.setattr(
+        notifier.GitHubVersionChecker,
+        "fetch_latest_version",
+        lambda self, current_version="0.2.1", timeout=1.5: latest_version,
+    )
+
+
+@given("upstream GitHub is unreachable or times out")
+def _given_upstream_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        notifier.GitHubVersionChecker,
+        "fetch_latest_version",
+        lambda self, current_version="0.2.1", timeout=1.5: None,
+    )
+
+
+@given(parsers.parse('the environment variable "{var_name}" is set to "{val}"'))
+def _given_env_var(monkeypatch: pytest.MonkeyPatch, var_name: str, val: str) -> None:
+    monkeypatch.setenv(var_name, val)
+
+
+@when("I run a mempalace CLI command")
+def _when_run_cli_cmd(
+    cli_runner: CliRunner, workspace: Path, notifier_run: dict[str, Any]
+) -> None:
+    result = cli_runner.invoke(app, ["doctor", "--workspace", str(workspace)])
+    notifier_run["result"] = result
+
+
+@then(parsers.parse('stderr displays an update banner suggesting "{expected_version}"'))
+def _then_stderr_banner(notifier_run: dict[str, Any], expected_version: str) -> None:
+    res = notifier_run["result"]
+    assert "mempalace update available" in res.stderr
+    assert expected_version in res.stderr
+
+
+@then("stdout remains clean and uncorrupted")
+def _then_stdout_clean(notifier_run: dict[str, Any]) -> None:
+    res = notifier_run["result"]
+    data = json.loads(res.stdout)
+    assert data.get("python_ok") is True
+
+
+@then(parsers.parse('"{cache_rel_path}" is updated with "{expected_version}"'))
+def _then_cache_updated(workspace: Path, cache_rel_path: str, expected_version: str) -> None:
+    cache_file = workspace / cache_rel_path
+    assert cache_file.exists()
+    data = json.loads(cache_file.read_text(encoding="utf-8"))
+    assert data["latest_version"] == expected_version.lstrip("v")
+
+
+@then("the command succeeds with exit code 0")
+def _then_cmd_succeeds(notifier_run: dict[str, Any]) -> None:
+    res = notifier_run["result"]
+    assert res.exit_code == 0
+
+
+@then("no error or trace is shown to the user")
+def _then_no_error(notifier_run: dict[str, Any]) -> None:
+    res = notifier_run["result"]
+    assert "Traceback" not in res.stdout
+    assert "Traceback" not in res.stderr
+
+
+@then("the check backs off without blocking the operation")
+def _then_backs_off(notifier_run: dict[str, Any]) -> None:
+    res = notifier_run["result"]
+    assert res.exit_code == 0
+
+
+@then("no update check or banner is emitted to stderr")
+def _then_no_banner(notifier_run: dict[str, Any]) -> None:
+    res = notifier_run["result"]
+    assert "mempalace update available" not in res.stderr
+
