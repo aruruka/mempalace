@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, cast
@@ -109,7 +111,7 @@ class UpdateCache:
 
 
 class GitHubVersionChecker:
-    """Checks the public GitHub API for the latest release tag."""
+    """Checks GitHub for the latest release tag via API and git remote fallback."""
 
     def __init__(self, repo: str = GITHUB_REPO) -> None:
         """Initialize with repository slug.
@@ -119,12 +121,77 @@ class GitHubVersionChecker:
         """
         self.repo = repo
 
+    def _fetch_from_github_api(self, current_version: str, timeout: float) -> str | None:
+        headers = {
+            "User-Agent": f"mempalace/{current_version}",
+            "Accept": "application/vnd.github.v3+json",
+        }
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+
+        url = f"https://api.github.com/repos/{self.repo}/releases/latest"
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                status = getattr(resp, "status", None)
+                if status is None:
+                    status = getattr(resp, "code", None)
+                if status == 200:
+                    raw_payload: object = json.loads(resp.read().decode("utf-8"))
+                    if isinstance(raw_payload, dict):
+                        payload_dict = cast(dict[str, Any], raw_payload)
+                        tag_name = payload_dict.get("tag_name")
+                        if isinstance(tag_name, str):
+                            return tag_name.strip().lstrip("v")
+        except urllib.error.HTTPError as err:
+            if err.code == 404:
+                # Fallback to /tags in case releases are not created or repo is private
+                tags_url = f"https://api.github.com/repos/{self.repo}/tags"
+                tags_req = urllib.request.Request(tags_url, headers=headers)
+                try:
+                    with urllib.request.urlopen(tags_req, timeout=timeout) as resp:
+                        status = getattr(resp, "status", None)
+                        if status is None:
+                            status = getattr(resp, "code", None)
+                        if status == 200:
+                            raw_tags: object = json.loads(resp.read().decode("utf-8"))
+                            if isinstance(raw_tags, list):
+                                tag_names: list[str] = []
+                                for item in cast(list[object], raw_tags):
+                                    if isinstance(item, dict):
+                                        name_val = cast(dict[str, Any], item).get("name")
+                                        if isinstance(name_val, str):
+                                            tag_names.append(name_val)
+                                if tag_names:
+                                    return max(tag_names, key=parse_semver).strip().lstrip("v")
+                except Exception:
+                    pass
+        except Exception:
+            return None
+        return None
+
+    def _fetch_from_git_remote(self, timeout: float) -> str | None:
+        try:
+            proc = subprocess.run(
+                ["git", "ls-remote", "--tags", "--refs", f"https://github.com/{self.repo}.git"],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+            if proc.returncode == 0 and proc.stdout:
+                tags = re.findall(r"refs/tags/(v?[\d\.]+)", proc.stdout)
+                if tags:
+                    return max(tags, key=parse_semver).strip().lstrip("v")
+        except Exception:
+            return None
+        return None
+
     def fetch_latest_version(
         self, current_version: str, timeout: float = DEFAULT_TIMEOUT_SECONDS
     ) -> str | None:
-        """Fetch the latest release tag name from GitHub Releases API.
-
-        Fails completely silently on any network, timeout, or parsing error.
+        """Fetch latest version from GitHub API with fallback to git remote.
 
         Args:
             current_version: The currently installed version for the User-Agent header.
@@ -133,27 +200,10 @@ class GitHubVersionChecker:
         Returns:
             Clean version string without 'v', or None on failure.
         """
-        url = f"https://api.github.com/repos/{self.repo}/releases/latest"
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": f"mempalace/{current_version}",
-                "Accept": "application/vnd.github.v3+json",
-            },
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                status = getattr(resp, "status", None)
-                if status is None:
-                    status = getattr(resp, "code", None)
-                if status == 200:
-                    payload = json.loads(resp.read().decode("utf-8"))
-                    tag_name = payload.get("tag_name")
-                    if isinstance(tag_name, str):
-                        return tag_name.strip().lstrip("v")
-        except Exception:
-            return None
-        return None
+        ver = self._fetch_from_github_api(current_version, timeout=timeout)
+        if ver is not None:
+            return ver
+        return self._fetch_from_git_remote(timeout=timeout)
 
 
 class NoticeRenderer:

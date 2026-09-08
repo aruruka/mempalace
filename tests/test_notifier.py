@@ -81,12 +81,31 @@ def test_github_version_checker_success() -> None:
 
 def test_github_version_checker_network_failure() -> None:
     checker = GitHubVersionChecker()
-    with patch(
-        "urllib.request.urlopen",
-        side_effect=urllib.error.URLError("Network unreachable"),
+    with (
+        patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("Network unreachable"),
+        ),
+        patch("subprocess.run", side_effect=Exception("Git unreachable")),
     ):
         latest = checker.fetch_latest_version(current_version="0.2.1")
         assert latest is None
+
+
+def test_github_version_checker_git_remote_fallback() -> None:
+    checker = GitHubVersionChecker()
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = "abc refs/tags/v0.3.5\n"
+    with (
+        patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.HTTPError("url", 404, "Not Found", None, None),  # type: ignore[arg-type]
+        ),
+        patch("subprocess.run", return_value=mock_proc),
+    ):
+        latest = checker.fetch_latest_version(current_version="0.2.1")
+        assert latest == "0.3.5"
 
 
 def test_notice_renderer_contains_expected_tokens() -> None:
