@@ -3,22 +3,22 @@
 > Standardized AI reference index adhering to Google Open Knowledge Format (OKF v0.2) and llms.txt standard.
 
 ## Core Workspace Entrypoints
-- [AGENTS.md](file:///D:/Work/mempalace/AGENTS.md): Knowledge schema, OKF v0.2 frontmatter rules, A2A Agent Card, and agent operating constraints.
-- [README.md](file:///D:/Work/mempalace/README.md): High-level package overview, CLI usage, retrieval layers, and contribution boundary.
+- [AGENTS.md](AGENTS.md): Knowledge schema, OKF v0.2 frontmatter rules, A2A Agent Card, and agent operating constraints.
+- [README.md](README.md): High-level package overview, CLI usage, retrieval layers, and contribution boundary.
 
 ## Architecture & Knowledge Base (OKF v0.2 Wiki)
-- [Wiki Catalog](file:///D:/Work/mempalace/wiki/index.md): Persistent knowledge catalog and concept map.
-- [Audit Log](file:///D:/Work/mempalace/wiki/log.md): Chronological history of schema and concept updates.
-- [Hybrid Retrieval Architecture](file:///D:/Work/mempalace/wiki/mempalace-v2-hybrid-retrieval.md): L1 lexical, L2 dense, and L3 fusion design.
+- [Wiki Catalog](wiki/index.md): Persistent knowledge catalog and concept map.
+- [Audit Log](wiki/log.md): Chronological history of schema and concept updates.
+- [Hybrid Retrieval Architecture](wiki/mempalace-v2-hybrid-retrieval.md): L1 lexical, L2 dense, and L3 fusion design.
 
 ## Harness Engineering & Playbook (A2A Protocol)
-- [Harness Playbook Pattern](file:///D:/Work/mempalace/docs/harness-playbook/PATTERN.md): Principles and flow for A2A Client/Remote agent collaboration.
-- [Architect Checklist](file:///D:/Work/mempalace/docs/harness-playbook/architect-checklist.md): A2A quality gates before issuing task handoffs.
-- [Implementor Handoff Template](file:///D:/Work/mempalace/docs/harness-playbook/implementor-handoff-template.md): A2A Task Object handoff structure.
+- [Harness Playbook Pattern](docs/harness-playbook/PATTERN.md): Principles and flow for A2A Client/Remote agent collaboration.
+- [Architect Checklist](docs/harness-playbook/architect-checklist.md): A2A quality gates before issuing task handoffs.
+- [Implementor Handoff Template](docs/harness-playbook/implementor-handoff-template.md): A2A Task Object handoff structure.
 
 ## Core Source & Architecture Decisions
-- [src/mempalace/](file:///D:/Work/mempalace/src/mempalace/): Core package (models, storage, retrieval, CLI).
-- [docs/decisions/](file:///D:/Work/mempalace/docs/decisions/): Architectural Decision Records (ADR-002, ADR-009).
-- [tests/features/](file:///D:/Work/mempalace/tests/features/): BDD contract specifications (Gherkin feature files).
-- [.agents/skills/](file:///D:/Work/mempalace/.agents/skills/): Workspace agent skills (A2A architect, memory-sync, ADR decision-making, Gherkin authoring).
+- [src/mempalace/](src/mempalace/): Core package (models, storage, retrieval, CLI).
+- [docs/decisions/](docs/decisions/): Architectural Decision Records (ADR-002, ADR-009).
+- [tests/features/](tests/features/): BDD contract specifications (Gherkin feature files).
+- [.agents/skills/](.agents/skills/): Workspace agent skills (A2A architect, memory-sync, ADR decision-making, Gherkin authoring).
 

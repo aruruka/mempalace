@@ -2,7 +2,7 @@
 type: Core Architecture
 title: MemPalace v2 — SQLite Hybrid Retrieval Memory
 description: Full-Python hybrid retrieval engine (SQLite + FTS5 BM25 + fastembed dense + RRF) replacing legacy DuckDB stores.
-resource: file:///D:/Work/mempalace/src/mempalace/
+resource: src/mempalace/
 tags: [memory, retrieval, sqlite, fts5, embeddings, hybrid, mempalace, typer]
 status: active
 generated:
@@ -10,7 +10,7 @@ generated:
   timestamp: 2026-09-05T22:05:00Z
 sources:
   - id: adr-009
-    resource: file:///D:/Work/mempalace/docs/decisions/ADR-009-sqlite-hybrid-retrieval-for-mempalace.md
+    resource: docs/decisions/ADR-009-sqlite-hybrid-retrieval-for-mempalace.md
     title: ADR-009 SQLite Hybrid Retrieval for MemPalace
     author: maintainers
     usage_count: 1

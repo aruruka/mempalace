@@ -30,7 +30,7 @@ Every concept document in `wiki/` MUST begin with YAML frontmatter:
 type: <Type Name>                  # REQUIRED (e.g. Architecture, Core Engine, Retrieval Layer, ADR)
 title: <Display Title>             # REQUIRED
 description: <One-line summary>   # REQUIRED
-resource: <Canonical URI/File>     # RECOMMENDED (e.g. file:///D:/Work/mempalace/src/mempalace/...)
+resource: <Canonical URI/File>     # RECOMMENDED (e.g. src/mempalace/...)
 tags: [<tag1>, <tag2>]             # RECOMMENDED
 status: active | deprecated        # REQUIRED
 generated:

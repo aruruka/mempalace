@@ -15,6 +15,7 @@ htmlcov/
 # Scratch
 tmp/
 scratch/
+tasks/
 reasonix.toml
 
 # Serena MCP server

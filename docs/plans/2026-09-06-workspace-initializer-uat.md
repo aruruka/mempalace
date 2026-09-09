@@ -2,9 +2,9 @@
 
 > **For Agent:** REQUIRED SUB-SKILL: Use executing-plans or subagent-driven execution to carry out this plan step-by-step.
 
-**Goal:** Conduct end-to-end User Acceptance Testing (UAT) of the MemPalace Workspace Initializer on an external workspace (`D:/Work/mempalace-uat-workspace`), validating human onboarding, agent kick-off prompt execution, and proposal-first memory synchronization.
+**Goal:** Conduct end-to-end User Acceptance Testing (UAT) of the MemPalace Workspace Initializer on an external workspace (`/tmp/mempalace-uat-workspace`), validating human onboarding, agent kick-off prompt execution, and proposal-first memory synchronization.
 
-**Architecture:** Create an isolated sample project workspace at `D:/Work/mempalace-uat-workspace`, execute human-facing `mempalace init-workspace` scaffolding, inspect the generated scaffolding (`MemPalace/essences/`, `docs/decisions/`, `AGENTS.md`, `.agents/skills/memory-sync/`, `MEMPALACE_KICKOFF.md`), simulate the coding agent executing the kick-off prompt, and test the full proposal-first memory ingestion cycle.
+**Architecture:** Create an isolated sample project workspace at `/tmp/mempalace-uat-workspace`, execute human-facing `mempalace init-workspace` scaffolding, inspect the generated scaffolding (`MemPalace/essences/`, `docs/decisions/`, `AGENTS.md`, `.agents/skills/memory-sync/`, `MEMPALACE_KICKOFF.md`), simulate the coding agent executing the kick-off prompt, and test the full proposal-first memory ingestion cycle.
 
 **Tech Stack:** Python 3.13, MemPalace v2 (SQLite + FTS5 + Embeddings), Typer CLI, pytest-bdd.
 
@@ -13,13 +13,13 @@
 ### Task 1: Prepare External Sample Workspace
 
 **Files:**
-- Create: `D:/Work/mempalace-uat-workspace/README.md`
-- Create: `D:/Work/mempalace-uat-workspace/pyproject.toml`
-- Create: `D:/Work/mempalace-uat-workspace/src/sample_app/main.py`
-- Create: `D:/Work/mempalace-uat-workspace/AGENTS.md` (initial baseline to test non-destructive appending)
+- Create: `/tmp/mempalace-uat-workspace/README.md`
+- Create: `/tmp/mempalace-uat-workspace/pyproject.toml`
+- Create: `/tmp/mempalace-uat-workspace/src/sample_app/main.py`
+- Create: `/tmp/mempalace-uat-workspace/AGENTS.md` (initial baseline to test non-destructive appending)
 
 **Step 1: Create target directory and sample project files**
-- Scaffold `D:/Work/mempalace-uat-workspace` with a minimal Python web service.
+- Scaffold `/tmp/mempalace-uat-workspace` with a minimal Python web service.
 - Add an existing `AGENTS.md` to verify that `init-workspace` appends without clobbering existing instructions.
 
 **Step 2: Verify workspace isolation**
@@ -30,10 +30,10 @@
 ### Task 2: Execute Human-Facing Workspace Initialization
 
 **Files:**
-- Output generated in: `D:/Work/mempalace-uat-workspace/`
+- Output generated in: `/tmp/mempalace-uat-workspace/`
 
 **Step 1: Execute `mempalace init-workspace` CLI command**
-- Run `uv run python -m mempalace init-workspace --workspace D:/Work/mempalace-uat-workspace --agent-flavor antigravity`
+- Run `uv run python -m mempalace init-workspace --workspace /tmp/mempalace-uat-workspace --agent-flavor antigravity`
 - Inspect CLI console output, ASCII banners, and generated summary report.
 
 **Step 2: Inspect Scaffolding Outputs**
@@ -49,16 +49,16 @@
 ### Task 3: Agent Onboarding & Kick-Off Prompt Execution
 
 **Files:**
-- Read: `D:/Work/mempalace-uat-workspace/MEMPALACE_KICKOFF.md`
+- Read: `/tmp/mempalace-uat-workspace/MEMPALACE_KICKOFF.md`
 
 **Step 1: Ingest & Execute Kick-Off Prompt**
 - Extract the verification command from `MEMPALACE_KICKOFF.md`:
-  `uv run python -m mempalace search --workspace D:/Work/mempalace-uat-workspace --mode bm25 "welcome"`
+  `uv run python -m mempalace search --workspace /tmp/mempalace-uat-workspace --mode bm25 "welcome"`
 - Verify search returns the starter essence with score and metadata.
 
 **Step 2: Verify Hybrid Retrieval in External Workspace**
 - Run:
-  `uv run python -m mempalace search --workspace D:/Work/mempalace-uat-workspace --mode hybrid "starter rules"`
+  `uv run python -m mempalace search --workspace /tmp/mempalace-uat-workspace --mode hybrid "starter rules"`
 - Confirm hybrid ranking and JSON formatting.
 
 ---
@@ -66,7 +66,7 @@
 ### Task 4: Validate Proposal-First Memory Sync Workflow
 
 **Files:**
-- Create: `D:/Work/mempalace-uat-workspace/MemPalace/essences/2026-09-06-sample-preference.md`
+- Create: `/tmp/mempalace-uat-workspace/MemPalace/essences/2026-09-06-sample-preference.md`
 
 **Step 1: Agent Proposal Simulation**
 - Simulate coding agent proposing a new preference essence according to `memory-sync` protocol.
@@ -74,7 +74,7 @@
 **Step 2: Write approved essence and trigger ingest**
 - Write `MemPalace/essences/2026-09-06-sample-preference.md`.
 - Run:
-  `uv run python -m mempalace ingest --workspace D:/Work/mempalace-uat-workspace`
+  `uv run python -m mempalace ingest --workspace /tmp/mempalace-uat-workspace`
 - Verify database updates (`docs_indexed` count increments).
 
 **Step 3: Query newly ingested essence**

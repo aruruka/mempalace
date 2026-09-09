@@ -166,5 +166,5 @@ Expected: PASS
 - `uv run pytest`
 - `uv run ruff check .`
 - `uv run pyright`
-**Step 2: Re-install tool locally and verify against `D:\Work\mempalace-uat-workspace-human`**
+**Step 2: Re-install tool locally and verify against `../mempalace-uat-workspace-human`**
 **Step 3: Commit and push changes to `origin/main`**
