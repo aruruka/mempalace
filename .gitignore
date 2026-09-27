@@ -21,6 +21,9 @@ reasonix.toml
 # Serena MCP server
 .serena/
 
+# Workbuddy
+.workbuddy/
+
 # Workspace update cache
 MemPalace/.cache.json
 .cache.json

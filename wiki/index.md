@@ -7,17 +7,17 @@ tags: [catalog, index, okf-v0.2, wiki]
 status: active
 generated:
   actor: agent:antigravity/1.0
-  timestamp: 2026-09-05T22:05:00Z
+  timestamp: 2026-09-27T23:49:00Z
 sources:
   - id: agy-agents-spec
     resource: AGENTS.md
     title: AGENTS.md Operating Rules
     author: agent:antigravity
-    usage_count: 1
-    last_modified: 2026-09-05
+    usage_count: 2
+    last_modified: 2026-09-27
 verified:
   by: agent:antigravity/1.0
-  at: 2026-09-05T22:05:00Z
+  at: 2026-09-27T23:49:00Z
   method: inspection
 ---
 
@@ -37,7 +37,15 @@ Welcome to the MemPalace persistent knowledge base. This wiki serves as the Laye
 
 ---
 
-## 2. Playbooks & Protocols
+## 2. Onboarding & Consumer Setup
+
+- [How to Set Up MemPalace in a New Project](workspace-setup-and-onboarding.md)  
+  *Tags*: `[setup, onboarding, initializer, quickstart, agent-card, doctor, bootstrap]`  
+  *Summary*: Canonical guide for importing MemPalace into consumer repositories, running automated environment bootstrap scripts, agent kick-off configuration, and health diagnostics.
+
+---
+
+## 3. Playbooks & Protocols
 
 - [Harness Engineering Pattern](../docs/harness-playbook/PATTERN.md)  
   *Tags*: `[a2a-protocol, harness, pattern]`  
@@ -53,7 +61,6 @@ Welcome to the MemPalace persistent knowledge base. This wiki serves as the Laye
 
 ---
 
-## 3. Maintenance & Audit
+## 4. Maintenance & Audit
 
 - [Audit Log (`wiki/log.md`)](log.md): Append-only chronological audit trail of all knowledge syntheses.
-

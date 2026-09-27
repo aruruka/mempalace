@@ -48,3 +48,11 @@ Format: `## [YYYY-MM-DD] <action> | <title>`
   - `tests/test_retrieval.py`: Added test for lazy auto-sync on search.
   - `README.md`: Updated CLI subcommands and feature documentation.
 
+## [2026-09-27] doc-reorg | Synthesis of Setup & Agent Onboarding Knowledge Base
+
+- **Actor**: `agent:antigravity/1.0`
+- **Context**: Executed full analysis and reorganization of all workspace markdown documents relating to "How to set up MemPalace in a new project". Created canonical OKF v0.2 wiki guide, updated wiki catalog, and enhanced consumer onboarding documentation in README.md.
+- **Artifacts Created / Updated**:
+  - `wiki/workspace-setup-and-onboarding.md`: Created comprehensive OKF v0.2 guide on consumer project setup, automated environment bootstrapping, agent kick-off prompt, and `mempalace doctor` diagnostics.
+  - `wiki/index.md`: Cataloged new onboarding section and cross-references.
+  - `README.md`: Structured Quickstart section with clear separation between Consumer Project Setup and Upstream Contributor Development.

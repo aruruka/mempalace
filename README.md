@@ -16,33 +16,68 @@ Three retrieval layers:
 Design decisions live in `docs/decisions/` (ADR-009 supersedes the original DuckDB approach in
 ADR-002). The golden-recall benchmark measured 1.000 macro recall@5 (hybrid) on its corpus.
 
-## 🚀 Quickstart: Import MemPalace into Your Workspace in 60 Seconds
+---
 
-You can import MemPalace into any existing project using an interactive wizard:
+## 🚀 Setting Up MemPalace in a New Project
+
+Import MemPalace into any existing or new project repository in 60 seconds using the automated onboarding wizard:
+
+### 1. Installation & Scaffolding
 
 ```bash
-# Option 1: Zero-install one-liner via uvx
+# Option 1: Zero-install one-liner via uvx (Fastest)
 uvx --from git+https://github.com/aruruka/mempalace.git mempalace init-workspace
 
 # Option 2: Install as a standalone CLI tool in your environment (Recommended)
 uv tool install git+https://github.com/aruruka/mempalace.git
 mempalace init-workspace
 
-# Option 3: Install as a dev dependency in your project
+# Option 3: Install as a project dev dependency (for UV projects)
 uv add --dev "mempalace @ git+https://github.com/aruruka/mempalace.git"
 uv run mempalace init-workspace
 ```
 
-The initializer wizard guides you interactively through:
-1. **Scaffolding**: Creates `MemPalace/essences/` and seeds a starter lesson.
-2. **Database Initialization**: Creates the local SQLite database and pre-indexes starter documents.
-3. **Agent Configuration**: Tailors rules for your coding agent (**OpenCode**, **Hermes**, **Antigravity / Gemini**, **Claude Code**, or **Cursor**) and installs the proposal-first `memory-sync` skill.
-4. **Automated Setup Scripts**: Generates `scripts/setup-mempalace.ps1` (Windows PowerShell) and `scripts/setup-mempalace.sh` (POSIX/Bash) to easily bootstrap `uv` and `mempalace` in any developer or agent environment.
-5. **Kick-off Prompt Generation**: Generates a ready-to-use kick-off prompt (`MEMPALACE_KICKOFF.md`) with self-healing instructions and displays it in the terminal.
+*(Note: `mempalace setup` is an alias for `mempalace init-workspace`)*
 
-> **Next step:** Copy the generated Kick-off Prompt and send it to your coding agent. The agent will run `mempalace doctor` to verify memory access and adopt the memory retention protocol!
+### 2. What gets generated
 
-## Setup (Contributing to Upstream MemPalace)
+The initializer scaffolds:
+- `MemPalace/essences/`: Storage directory for markdown lesson files and `template.md`.
+- `MemPalace/memory.sqlite`: Derived local index pre-loaded with starter vectors.
+- `scripts/setup-mempalace.ps1` & `.sh`: Cross-platform bootstrap scripts for team members & CI runners.
+- `.agents/skills/memory-sync/SKILL.md`: Proposal-first memory retention skill for coding agents.
+- `MEMPALACE_KICKOFF.md`: Agent activation prompt tailored to your selected agent flavor (**OpenCode**, **Hermes**, **Antigravity / Gemini**, **Claude Code**, or **Cursor**).
+
+### 3. Agent Kick-off & Health Check
+
+1. Copy the generated prompt in `MEMPALACE_KICKOFF.md` and send it to your coding agent.
+2. Run `mempalace doctor` at any time to verify system requirements, database integrity, and embedding coverage:
+   ```bash
+   mempalace doctor
+   ```
+
+For detailed architecture, configuration flags, and CI workflows, see the [Workspace Setup & Onboarding Guide](wiki/workspace-setup-and-onboarding.md).
+
+---
+
+## 🛠️ Usage in Consumer Projects
+
+```bash
+# Daily operations
+mempalace list                             # Catalog all essences, categories, ADRs & vector coverage (alias: ls)
+mempalace search file lock hermes          # Multi-word semantic & lexical search (auto-syncs fresh essences)
+mempalace doctor                           # Run system & workspace health diagnostics
+mempalace ingest                           # Re-index all markdown files into SQLite
+mempalace embed                            # Compute embeddings for dense hybrid search
+mempalace reconcile                        # Check for drift between disk files and database
+mempalace sync --id <id> --summary "..."   # Propose and persist a new memory essence
+```
+
+---
+
+## 💻 Setup (Contributing to Upstream MemPalace)
+
+If you are developing or contributing to MemPalace itself:
 
 Requires Python >= 3.13 and [uv](https://docs.astral.sh/uv/).
 
@@ -54,28 +89,13 @@ uv sync --extra legacy    # + duckdb (only needed for migrating a v1 DuckDB stor
 
 Optional extras: `vec` (sqlite-vec), `legacy` (duckdb).
 
-## Usage
+### Testing & Verification
 
 ```bash
-uv run mempalace --help
-uv run python -m mempalace doctor         # environment & database health diagnostics
-uv run python -m mempalace init-workspace # interactive workspace onboarding wizard (alias: setup)
-uv run python -m mempalace list           # list all essences, categories, ADRs & vector coverage (alias: ls)
-uv run python -m mempalace init           # create schema (idempotent)
-uv run python -m mempalace ingest         # derive DB + search index from essence/ADR files
-uv run python -m mempalace embed          # compute embeddings (offline after the first run)
-uv run python -m mempalace search file lock hermes # multi-token positional search (auto-syncs fresh essences)
-uv run python -m mempalace reconcile      # drift report between files and DB
-uv run python -m mempalace sync --id <session_id> --summary "..." --tags a,b
+uv run pytest             # full suite (BDD contract, in-memory, black-box)
+uv run ruff check . && uv run ruff format --check .
+uv run pyright            # src strict; relaxations are per-file directives (see pyrightconfig.json)
 ```
-
-### CLI subcommands
-
-`doctor`, `init-workspace` (alias `setup`), `list` (alias `ls`), `init`, `ingest`, `sync`, `search` (JSON out;
-`--mode bm25|dense|hybrid`, multi-word unquoted args supported), `reconcile`, `embed`, `register-tools`, `register-decisions`.
-
-`init-workspace` auto-indexes dense vectors upon setup, ensuring hybrid search works immediately. `search` lazily detects
-and reconciles newly added essence files on disk before executing queries.
 
 ## Layout
 
@@ -83,15 +103,8 @@ and reconciles newly added essence files on disk before executing queries.
 src/mempalace/            package (models/config/storage/ingest/reconcile/embeddings/retrieval/cli)
 tests/                    BDD contract + in-memory + black-box tests
 tests/benchmark/          golden recall benchmark harness (requires a workspace corpus)
-docs/decisions/           ADR-002 (superseded), ADR-009 (current SQLite hybrid decision)
-```
-
-## Testing
-
-```bash
-uv run pytest             # full suite (BDD, in-memory, black-box)
-uv run ruff check . && uv run ruff format --check .
-uv run pyright            # src strict; relaxations are per-file directives (see pyrightconfig.json)
+docs/decisions/           ADR-002 (superseded), ADR-009 (SQLite hybrid), ADR-010 (workspace initializer)
+wiki/                     OKF v0.2 persistent knowledge base
 ```
 
 ## Data model & policy
