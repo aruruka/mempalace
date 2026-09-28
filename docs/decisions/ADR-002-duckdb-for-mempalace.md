@@ -3,6 +3,9 @@
 Date: 2026-04-16
 Status: superseded
 Tags: memory, storage, duckdb
+Deciders: aruruka
+Supersedes: None
+Superseded-by: ADR-009
 
 ## Context
 The workspace needs local, structured, queryable memory for sessions, pitfalls, preferences, and tool metadata.

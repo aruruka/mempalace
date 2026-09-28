@@ -1,9 +1,11 @@
 # ADR-XXX: <Short Title>
 
 Date: YYYY-MM-DD
-Status: proposed|active|rejected|deprecated|superseded
+Status: draft|proposed|active|accepted|rejected|deprecated|superseded
 Tags: <comma-separated>
 Deciders: <names or handles>
+Supersedes: None
+Superseded-by: None
 
 ## Context
 What problem triggered this decision, and why now?

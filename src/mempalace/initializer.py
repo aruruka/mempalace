@@ -32,27 +32,38 @@ SUPPORTED_AGENTS: list[str] = [f.value for f in AgentFlavor]
 
 _ESSENCE_README = """# MemPalace Essences
 
-Essence files (`*.md`) are the **single source of truth** for agent memory.
-Each essence represents a hard-won pitfall, architectural preference, or style.
+Essence files (`YYYY-MM-DD-slug.md`) are the **single source of truth** for semantic agent memory.
+Each essence captures a non-obvious pitfall, architectural preference, or thinking style.
+
+## Deterministic Qualification Rubric
+A candidate qualifies for `MemPalace/essences/` only if it passes all three gates:
+- **Tooling Invisibility ($I \\ge 2$)**: Cannot be prevented by a linter rule or type check alone.
+- **Blast Radius ($B \\ge 2$)**: Affects more than a single isolated helper function.
+- **Composite Score ($S \\ge 3.2$)**: $S = 0.35B + 0.30R + 0.20P + 0.15I$ (1-5 scale for
+  Blast Radius $B$, Root-Cause Depth $R$, Reproducibility $P$, and Tooling Invisibility $I$).
 
 ## Rules
 - **English-only**: Workspace policy requires English text.
-- **Derived SQLite store**: The database (`MemPalace/memory.sqlite`) is derived
-  from these files via:
+- **Header metadata**: Include `Date: YYYY-MM-DD`, `Category: pitfall|preference|thinking_style`,
+  and optional `Status: active|superseded|deprecated` (or equivalent YAML frontmatter).
+- **Derived SQLite store**: The database (`MemPalace/memory.sqlite`) is derived via:
   ```bash
   mempalace ingest
   ```
-- **Syncing memory**: Run `mempalace ingest` after creating or editing essences.
 """
 
 _DECISION_README = """# Architecture Decision Records (ADRs)
 
 This directory contains Architecture Decision Records (ADRs) for this workspace.
-Records document key architectural choices, context, trade-offs, and consequences.
+Records document irreversible or high-migration-cost (Type 1) architectural choices.
 
 ## Rules
 - Create new records using `template.md`.
 - File naming convention: `ADR-NNN-short-slug.md`.
+- Valid lifecycle statuses: `draft`, `proposed`, `active`, `accepted`, `rejected`,
+  `deprecated`, `superseded`.
+- When superseding a prior ADR, update both files bidirectionally (`Supersedes: ADR-NNN`
+  and `Superseded-by: ADR-MMM`).
 - Register decisions into MemPalace with:
   ```bash
   mempalace register-decisions
@@ -62,9 +73,11 @@ Records document key architectural choices, context, trade-offs, and consequence
 _DECISION_TEMPLATE = """# ADR-NNN: Title
 
 Date: YYYY-MM-DD
-Status: active
+Status: proposed|active|accepted|rejected|deprecated|superseded
 Tags: tag1, tag2
 Deciders: author
+Supersedes: None
+Superseded-by: None
 
 ## Context
 What is the problem or architectural context?
@@ -88,7 +101,10 @@ What was chosen and why?
 - None
 """
 
-_SETUP_PS1_TEMPLATE = """# MemPalace v2 Environment Setup & Verification Script (Windows PowerShell)
+_SETUP_PS1_TEMPLATE = """<#
+.SYNOPSIS
+MemPalace v2 automated environment setup and verification script for Windows PowerShell.
+#>
 $ErrorActionPreference = "Stop"
 
 Write-Host "`n🏰 MemPalace v2 — Automated Environment Setup`n" -ForegroundColor Cyan
@@ -137,7 +153,7 @@ Write-Host "`n✨ MemPalace environment setup complete! Your workspace is ready.
 """
 
 _SETUP_SH_TEMPLATE = """#!/usr/bin/env bash
-# MemPalace v2 Environment Setup & Verification Script (POSIX / macOS / Linux)
+# @description: MemPalace v2 automated environment setup and verification script (POSIX/Bash).
 set -euo pipefail
 
 echo -e "\\n\\033[1;36m🏰 MemPalace v2 — Automated Environment Setup\\033[0m\\n"
@@ -191,37 +207,81 @@ tags:
   - sync
 ---
 
-# SKILL: MemPalace Synchronization (proposal-first)
+# SKILL: MemPalace 4-Entity Synchronization (proposal-first)
 
 ## Purpose
-Agentic memory routine for durable long-term context.
-**The agent proposes what is worth remembering; the user decides what gets written.**
-Nothing is written to `MemPalace/essences/` without explicit user confirmation.
+Agentic memory routine for **Semantic Essences**, **Episodic Sessions**, and **Tools**.
+**The agent proposes semantic lessons; the user decides what gets written.**
 
-## When to propose (candidate events)
-A task produced a MemPalace candidate when it satisfies **at least one** of:
-- **Fix with a root cause**: an error was hit, the *why* was found, and the fix
-  is not already captured in code or an existing essence.
-- **New canonical path or preference**: a decision about *how this workspace does things*
-  (tool usage, testing rules, config patterns).
-- **Component evaluated or added**: new package dependency, algorithm evaluation,
-  or CLI feature with a lesson.
-- **Cross-file insight**: knowledge spanning files that would be lost by reading any single file.
-- **Hard-won, non-obvious fact**: something rediscovered this session that will cost time again.
+## 1. Semantic Memory (`MemPalace/essences/*.md`) — Proposal-First
+A candidate lesson qualifies for `MemPalace/essences/` if and only if it passes all three gates:
+- **Tooling Invisibility ($I \\ge 2$)**: Cannot be caught by a linter rule or type check alone.
+- **Blast Radius ($B \\ge 2$)**: Extends beyond a single internal function.
+- **Composite Score ($S \\ge 3.2$)**: $S = 0.35B + 0.30R + 0.20P + 0.15I$ (1-5 scale).
 
-## Proposal protocol
+### Proposal Protocol
 1. **Search** for an existing essence covering the candidate:
    ```bash
    mempalace search --mode hybrid "<query>"
    ```
-2. **Classify** candidate: `pitfall` | `preference` | `thinking_style`.
+2. **Classify** candidate: `pitfall` | `preference` | `thinking_style` and compute score $S$.
 3. **Present** a compact block at the end of your reply:
    ```text
    🧠 MemPalace candidates (1)
-   1. [pitfall] description -> essence YYYY-MM-DD-slug.md
+   1. [pitfall | S=3.65 (B=3,R=4,P=4,I=4)] description -> essence YYYY-MM-DD-slug.md
    Reply "write 1" / "skip" / "edit" - nothing is written until you confirm.
    ```
 4. Write only after user approves, then run `mempalace ingest`.
+
+## 2. Episodic Memory (`MemPalace/sessions.jsonl`) — Session Closure
+When closing out a non-trivial task, bug investigation, or feature implementation, record a
+condensed episodic session log (persisted to `MemPalace/sessions.jsonl` and indexed in SQLite):
+```bash
+mempalace sync --id "<YYYY-MM-DD-short-topic>" \\
+  --summary "<1-2 sentence summary of task, lessons, and outcome>" \\
+  --tags "<comma-separated tags>"
+```
+
+## 3. Procedural Memory (`tools/`, `scripts/`) & Hygiene
+- Before creating a new utility script, search registered workspace tools:
+  ```bash
+  mempalace search --source tool "<capability>"
+  ```
+- After adding or updating tools under `tools/<subdir>/` or `scripts/`, run:
+  ```bash
+  mempalace register-tools
+  ```
+- When `mempalace doctor` warns that stale/archived records reached the threshold ($\\ge 20$),
+  run `mempalace sweep` to evict stale vectors and optimize FTS5.
+"""
+
+_DECISION_MAKING_SKILL = """---
+name: decision-making
+description: Record, review, supersede, and register architecture decisions (ADRs) in MemPalace.
+tags:
+  - adr
+  - architecture
+  - governance
+---
+
+# SKILL: Decision Making and ADR Lifecycle Governance
+
+## Trigger (Type 1 Decisions Only)
+Create an ADR in `docs/decisions/ADR-NNN-short-slug.md` for irreversible or high-migration-cost
+architectural choices (storage engines, model runtimes, CLI/API contracts, core dependencies).
+Routine refactors and local bugfixes belong in commits or specs, not ADRs.
+
+## ADR Lifecycle & Supersession
+- Valid statuses: `draft`, `proposed`, `active`, `accepted`, `rejected`, `deprecated`, `superseded`.
+- Default search (`mempalace search`) surfaces only `active` and `accepted` decisions.
+  Use `mempalace search --include-archived "<query>"` to inspect historical/superseded ADRs.
+- When superseding an ADR, update **both** records bidirectionally:
+  - New ADR header: `Supersedes: ADR-NNN`
+  - Old ADR header: `Status: superseded` and `Superseded-by: ADR-MMM`
+- After creating or updating an ADR, run:
+  ```bash
+  mempalace register-decisions
+  ```
 """
 
 
@@ -290,11 +350,14 @@ def generate_agent_rules(flavor: AgentFlavor) -> str:
     """
     return f"""
 <!-- BEGIN MEMPALACE INTEGRATION -->
-## MemPalace Agent Memory Protocol
+## MemPalace Unified 4-Entity Memory & ADR Governance Protocol
 
-This workspace uses **MemPalace v2** for persistent cross-session memory.
+This workspace uses **MemPalace v2** for persistent cross-session memory across 4 entity stores:
 - **Target Agent**: `{flavor.value}`
-- **Memory Store**: `MemPalace/essences/*.md` (single source of truth)
+- **1. Semantic Memory (Wisdom)**: `MemPalace/essences/*.md` (single source of truth)
+- **2. Architectural Memory (Decisions)**: `docs/decisions/ADR-NNN-*.md`
+- **3. Episodic Memory (Sessions)**: `MemPalace/sessions.jsonl`
+- **4. Procedural Memory (Tools)**: `tools/<subdir>/` and `scripts/*`
 - **Derived SQLite DB**: `MemPalace/memory.sqlite`
 - **Environment Doctor**: `mempalace doctor`
 - **Setup Script**: `scripts/setup-mempalace.ps1` (Windows) / `scripts/setup-mempalace.sh` (POSIX)
@@ -302,16 +365,29 @@ This workspace uses **MemPalace v2** for persistent cross-session memory.
 ### Operational Rules for Agents:
 0. **Verify Environment**: Run `mempalace doctor` if memory commands fail;
    execute the workspace setup script (`scripts/setup-mempalace.ps1`/`.sh`) to bootstrap.
-1. **Query Before Starting**: Before starting complex tasks, query existing memories:
+1. **Query Before Starting**: Before starting complex tasks or writing new scripts, query memory:
    ```bash
    mempalace search --mode hybrid "<query>"
+   mempalace search --source tool "<capability>"
    ```
-2. **Proposal-First Memory**: At the end of sessions with significant lessons,
-   propose memory candidates to the user. Do not write essences without confirmation.
-3. **Ingest After Writing**: Whenever essence files or ADRs are updated, refresh the index:
-   ```bash
-   mempalace ingest
-   ```
+2. **Deterministic Essence Qualification (Proposal-First)**:
+   Propose a candidate for `MemPalace/essences/` only if it passes all three gates:
+   - **Tooling Invisibility ($I \\ge 2$)**: Cannot be caught by a linter rule or type check alone.
+   - **Blast Radius ($B \\ge 2$)**: Extends beyond a single internal function.
+   - **Composite Score ($S \\ge 3.2$)**: $S = 0.35B + 0.30R + 0.20P + 0.15I$ (1-5 scale).
+   Do not write essences without explicit user confirmation.
+3. **ADR Lifecycle Governance**:
+   Record Type 1 irreversible architectural decisions in `docs/decisions/ADR-NNN-*.md` using
+   lifecycle statuses (`draft`, `proposed`, `active`, `accepted`, `rejected`, `deprecated`,
+   `superseded`) and bidirectional supersession (`Supersedes:` / `Superseded-by:`).
+4. **Episodic Session & Procedural Tool Sync**:
+   - At task/session closure, record a condensed session summary:
+     `mempalace sync --id "<session-id>" --summary "<summary>" --tags "<tags>"`
+   - After adding/editing essences, ADRs, or tools, refresh the index:
+     ```bash
+     mempalace ingest
+     ```
+   - When `mempalace doctor` warns of stale/archived count ($\\ge 20$), run `mempalace sweep`.
 <!-- END MEMPALACE INTEGRATION -->
 """
 
@@ -330,7 +406,8 @@ def generate_kickoff_prompt(flavor: AgentFlavor, workspace: Path) -> str:
     flavor_specific = ""
     if flavor == AgentFlavor.ANTIGRAVITY:
         flavor_specific = (
-            "- Follow the `.agents/skills/memory-sync/SKILL.md` skill for memory retention.\n"
+            "- Follow `.agents/skills/memory-sync/SKILL.md` and "
+            "`.agents/skills/decision-making/SKILL.md`.\n"
             "- Check `AGENTS.md` for workspace rules and operating constraints."
         )
     elif flavor == AgentFlavor.CLAUDE:
@@ -359,7 +436,7 @@ def generate_kickoff_prompt(flavor: AgentFlavor, workspace: Path) -> str:
             "- Always query memory before starting major tasks."
         )
 
-    return f"""Hello! I have integrated **MemPalace v2** into {ws_name} for persistent agent memory.
+    return f"""Hello! I have integrated **MemPalace v2** into {ws_name} for 4-entity agent memory.
 
 ### 0. Environment Prerequisite & Self-Healing:
 - **Diagnostic Check**: Run `mempalace doctor` to verify your environment and database status.
@@ -368,21 +445,26 @@ def generate_kickoff_prompt(flavor: AgentFlavor, workspace: Path) -> str:
   - Linux / macOS (Bash): `./scripts/setup-mempalace.sh`
   - Or manually install via uv: `uv tool install git+https://github.com/aruruka/mempalace.git`
 
-### 1. Your Memory Instructions:
-1. **MemPalace Location**: Markdown files in `MemPalace/essences/*.md` are the source of truth.
-   The SQLite DB at `MemPalace/memory.sqlite` provides hybrid search (BM25 + embeddings).
-2. **Querying Memory**: Before starting complex tasks, search for past lessons:
+### 1. Your 4-Entity Memory Instructions:
+1. **Four Memory Stores**:
+   - **Wisdom (`MemPalace/essences/*.md`)**: Semantic pitfalls, preferences, and thinking styles.
+   - **Decisions (`docs/decisions/ADR-NNN-*.md`)**: Type 1 ADRs (`active`/`superseded`).
+   - **Sessions (`MemPalace/sessions.jsonl`)**: Condensed episodic task logs (`mempalace sync`).
+   - **Tools (`tools/<subdir>/`, `scripts/*`)**: Workspace scripts (`mempalace register-tools`).
+2. **Querying Memory**: Before starting complex tasks or creating scripts, search memory:
    ```bash
    mempalace search --mode hybrid "<keywords>"
+   mempalace search --source tool "<capability>"
    ```
-3. **Proposal-First Protocol**:
+3. **Proposal-First Essence Protocol & Session Sync**:
    - Do NOT silently edit essence files.
-   - When a session uncovers an important lesson, propose candidate essences to me:
-     `🧠 MemPalace candidate: [pitfall/preference/thinking_style] <summary>`
+   - Qualify candidates via $S = 0.35B + 0.30R + 0.20P + 0.15I \\ge 3.2$ ($I \\ge 2, B \\ge 2$):
+     `🧠 MemPalace candidate: [pitfall/preference/thinking_style | S=...] <summary>`
    - Once approved, save to `MemPalace/essences/YYYY-MM-DD-slug.md` (English-only) and run:
      ```bash
      mempalace ingest
      ```
+   - At task closure, log the session via `mempalace sync --id "<id>" --summary "<summary>"`.
 {flavor_specific}
 
 ### 2. Immediate Verification Task:
@@ -500,10 +582,12 @@ def initialize_workspace(cfg: WorkspaceInitializerConfig) -> WorkspaceInitialize
         agents_md = ws / "AGENTS.md"
         _write_file(agents_md, rules_content, append_if_exists=True)
 
-    # 5. Install memory-sync skill if requested
+    # 5. Install memory-sync and decision-making skills if requested
     if cfg.install_skills:
         skill_file = ws / ".agents" / "skills" / "memory-sync" / "SKILL.md"
         _write_file(skill_file, _MEMORY_SYNC_SKILL)
+        decision_skill = ws / ".agents" / "skills" / "decision-making" / "SKILL.md"
+        _write_file(decision_skill, _DECISION_MAKING_SKILL)
 
     # 6. Install automated setup scripts if requested
     if cfg.setup_scripts:

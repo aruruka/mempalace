@@ -62,22 +62,28 @@ When running `mempalace init-workspace`, the interactive wizard (or `--agent` no
 Target Repository
 ├── MemPalace/
 │   ├── essences/
-│   │   ├── template.md                      # Essence markdown template
-│   │   └── YYYY-MM-DD-starter-lesson.md     # Initial starter essence
+│   │   ├── README.md                        # Essence qualification rubric & rules
+│   │   └── YYYY-MM-DD-welcome-to-mempalace.md # Initial starter essence
+│   ├── sessions.jsonl                       # Durable episodic session log (created on sync)
 │   └── memory.sqlite                        # Pre-indexed SQLite database + embeddings
+├── docs/decisions/
+│   ├── README.md                            # ADR index & status lifecycle rules
+│   └── template.md                          # ADR template with bidirectional supersession
 ├── scripts/
 │   ├── setup-mempalace.ps1                  # Windows automated environment setup
 │   └── setup-mempalace.sh                   # POSIX/macOS/Linux automated setup
-├── .agents/skills/memory-sync/SKILL.md      # Proposal-first memory retention skill
+├── .agents/skills/
+│   ├── memory-sync/SKILL.md                 # 4-Entity proposal-first memory & session sync skill
+│   └── decision-making/SKILL.md             # ADR lifecycle & governance skill
 ├── AGENTS.md / CLAUDE.md / .cursorrules     # Agent operating instructions & protocol
 └── MEMPALACE_KICKOFF.md                     # Ready-to-copy agent activation prompt
 ```
 
-1. **Scaffolding**: Creates `MemPalace/essences/` and seeds a starter lesson with template guidance.
-2. **Database & Embeddings**: Creates `MemPalace/memory.sqlite`, initialises FTS5 schema, indexes starter essences, and pre-computes dense vector embeddings so hybrid search works immediately.
+1. **Scaffolding**: Creates `MemPalace/essences/` and `docs/decisions/` with starter templates and deterministic qualification rules.
+2. **Database & Embeddings**: Creates `MemPalace/memory.sqlite`, initialises FTS5 schema across all 4 entities (`wisdom`, `decision`, `session`, `tool`), indexes starter records, and pre-computes dense vector embeddings so hybrid search works immediately.
 3. **Agent Integration**: Installs agent configuration tailored to your target agent:
    - **OpenCode** / **Hermes** / **Antigravity** / **Gemini** / **Claude Code** / **Cursor** / **Generic**.
-   - Installs the proposal-first `memory-sync` skill under `.agents/skills/memory-sync/SKILL.md`.
+   - Installs `.agents/skills/memory-sync/SKILL.md` and `.agents/skills/decision-making/SKILL.md`.
 4. **Automated Setup Scripts**: Generates `scripts/setup-mempalace.ps1` (PowerShell) and `scripts/setup-mempalace.sh` (Bash) to ensure zero-friction setup for team members and CI runners.
 5. **Kick-Off Prompt**: Synthesizes `MEMPALACE_KICKOFF.md` containing clear activation instructions and self-healing environment bootstrap guidance for the agent.
 
@@ -92,7 +98,7 @@ Once `mempalace init-workspace` completes:
 3. The agent will:
    - Run `mempalace doctor` to verify environment prerequisites and SQLite memory connectivity.
    - Run `mempalace search` / `mempalace list` to recall project conventions and lessons.
-   - Adopt the **proposal-first memory protocol** (proposing new essences when solving complex bugs or discovering architectural patterns).
+   - Adopt the **Unified 4-Entity Memory Protocol** (proposing qualified essences, recording ADRs, logging episodic sessions via `mempalace sync`, and registering reusable tools via `mempalace register-tools`).
 
 ---
 
@@ -130,38 +136,45 @@ mempalace doctor
 The diagnostic tool checks:
 - **System Prerequisites**: Python runtime version ($\ge 3.13$), `uv` package manager installation.
 - **CLI Availability**: Whether `mempalace` is directly in `PATH` or accessible via `uvx`/`uv run`.
-- **Database & Storage**: Existence of `MemPalace/memory.sqlite`, write permissions, schema integrity, and vector embedding coverage.
+- **Database & Storage**: Existence of `MemPalace/memory.sqlite`, write permissions, schema integrity, vector embedding coverage, and stale/archived entity count (`stale_count`, warning when $\ge 20$).
 - **Essence Files**: Valid essence count, drift check vs database rows.
 - **Agent Artifacts**: Verification of agent rules files (`AGENTS.md` / `CLAUDE.md`) and the `memory-sync` skill.
 
 ---
 
-## 6. Daily Memory Workflow
+## 6. Daily 4-Entity Memory Workflow
 
-In a project utilizing MemPalace, the routine interaction pattern is:
+In a project utilizing MemPalace, the routine interaction pattern across essences and sessions is:
 
 ```mermaid
 sequenceDiagram
     participant User as Developer / User
     participant Agent as Coding Agent
     participant MP as MemPalace Engine
-    participant Files as MemPalace/essences/*.md
+    participant Files as MemPalace/essences/*.md & sessions.jsonl
 
     Agent->>MP: mempalace search <keywords>
-    MP-->>Agent: JSON recall results (BM25 + Dense RRF)
+    MP-->>Agent: Active JSON recall results (BM25 + Dense RRF)
     Note over Agent: Performs coding & debugging tasks...
-    Agent->>User: Proposes new essence (lesson learned)
+    Agent->>User: Proposes qualified essence (S >= 3.2)
     User-->>Agent: Confirms proposal
     Agent->>Files: Writes new YYYY-MM-DD-lesson.md
-    Agent->>MP: mempalace sync (or auto-ingested on next search)
-    MP-->>Agent: Confirmation & vector embedding
+    Agent->>MP: mempalace ingest && mempalace embed
+    MP-->>Agent: Indexes essence & updates vectors
+    Agent->>MP: mempalace sync --id <session-id> --summary "..." --tags "..."
+    MP->>Files: Appends to MemPalace/sessions.jsonl & indexes session
 ```
 
 ### Useful Commands in Consumer Workspaces
 
 - **List memories**: `mempalace list` (or `mempalace ls`)
-- **Search memory**: `mempalace search <query>` (e.g. `mempalace search auth token refresh`)
-- **Ingest manual essence edits**: `mempalace ingest`
+- **Search active memory**: `mempalace search <query>` (or `--source tool <query>`)
+- **Search including archived/superseded**: `mempalace search --include-archived <query>`
+- **Ingest essences, ADRs, sessions.jsonl, and tools**: `mempalace ingest`
+- **Log an episodic session**: `mempalace sync --id <session-id> --summary "<summary>" --tags "<tags>"`
+- **Register ADRs / tools**: `mempalace register-decisions` / `mempalace register-tools`
+- **Evict non-active vectors & optimize FTS5**: `mempalace sweep`
 - **Recompute embeddings**: `mempalace embed`
 - **Check drift**: `mempalace reconcile`
-- **Diagnose setup**: `mempalace doctor`
+- **Diagnose setup & hygiene**: `mempalace doctor`
+
