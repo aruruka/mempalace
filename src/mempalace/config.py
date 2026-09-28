@@ -7,6 +7,7 @@ from pathlib import Path
 
 DEFAULT_MODEL = "BAAI/bge-small-en-v1.5"
 RRF_K = 60
+HYGIENE_STALE_THRESHOLD = 20
 
 
 def resolve_workspace(workspace_arg: str | None) -> Path:
@@ -45,6 +46,11 @@ def essence_dir(workspace: Path) -> Path:
 def decisions_dir(workspace: Path) -> Path:
     """Return the ADR decisions directory for a workspace."""
     return workspace / "docs" / "decisions"
+
+
+def sessions_jsonl_path(workspace: Path) -> Path:
+    """Return the append-only JSONL path for episodic sessions."""
+    return workspace / "MemPalace" / "sessions.jsonl"
 
 
 def legacy_duckdb_path(workspace: Path) -> Path:
