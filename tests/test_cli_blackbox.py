@@ -171,3 +171,61 @@ def test_blackbox_update_notifier_stderr_banner(workspace: Path, db_path: Path) 
     assert "v9.9.9" in result.stderr
     data = json.loads(result.stdout)
     assert data["wisdom_upserted"] == 3
+
+
+def test_blackbox_sync_persists_jsonl_and_sweep(workspace: Path, db_path: Path) -> None:
+    _run(db_path, workspace, ["ingest"])
+    sync = _run(
+        db_path,
+        workspace,
+        [
+            "sync",
+            "--id",
+            "sess-durable-101",
+            "--summary",
+            "investigated sqlite vec eviction and sweep command",
+            "--tags",
+            "storage,sweep",
+        ],
+    )
+    assert sync.returncode == 0, sync.stderr
+    assert (workspace / "MemPalace" / "sessions.jsonl").exists()
+
+    # Delete SQLite DB and rebuild via ingest to verify sessions.jsonl durability
+    db_path.unlink()
+    reingest = _run(db_path, workspace, ["ingest"])
+    assert reingest.returncode == 0, reingest.stderr
+
+    search = _run(
+        db_path, workspace, ["search", "investigated sqlite vec eviction", "--mode", "bm25"]
+    )
+    assert search.returncode == 0, search.stderr
+    hits = json.loads(search.stdout)["hits"]
+    assert any(h["source_ref"] == "sess-durable-101" for h in hits)
+
+    sweep = _run(db_path, workspace, ["sweep"])
+    assert sweep.returncode == 0, sweep.stderr
+    sweep_data = json.loads(sweep.stdout)
+    assert sweep_data["fts_optimized"] is True
+
+
+def test_blackbox_search_include_archived(workspace: Path, db_path: Path) -> None:
+    adr2 = workspace / "docs" / "decisions" / "ADR-002-old-duckdb.md"
+    adr2.write_text(
+        "# ADR-002: Old DuckDB Engine\n\nDate: 2026-04-16\nStatus: superseded\n"
+        "Tags: duckdb\n\n## Context\nLegacy duckdb storage engine details.\n",
+        encoding="utf-8",
+    )
+    _run(db_path, workspace, ["ingest"])
+
+    default_res = _run(db_path, workspace, ["search", "Legacy duckdb storage", "--mode", "bm25"])
+    assert default_res.returncode == 0, default_res.stderr
+    assert all(h["source_ref"] != "ADR-002" for h in json.loads(default_res.stdout)["hits"])
+
+    archived_res = _run(
+        db_path,
+        workspace,
+        ["search", "Legacy duckdb storage", "--mode", "bm25", "--include-archived"],
+    )
+    assert archived_res.returncode == 0, archived_res.stderr
+    assert any(h["source_ref"] == "ADR-002" for h in json.loads(archived_res.stdout)["hits"])

@@ -65,3 +65,26 @@ def test_cli_doctor_human_output(tmp_path: Path, cli_runner: CliRunner) -> None:
     assert "MemPalace Environment Diagnostics" in result.output
     assert "Python Version" in result.output
     assert "SQLite FTS5" in result.output
+
+
+def test_diagnose_environment_stale_threshold_warning(tmp_path: Path) -> None:
+    from mempalace import storage
+
+    cfg = WorkspaceInitializerConfig(workspace=tmp_path, embed=False)
+    initialize_workspace(cfg)
+
+    conn = storage.connect(tmp_path / "MemPalace" / "memory.sqlite")
+    try:
+        for i in range(20):
+            conn.execute(
+                "INSERT INTO search_docs (source_kind, source_ref, title, body, status) "
+                "VALUES ('session', ?, 'old', 'body', 'archived')",
+                (f"stale-sess-{i}",),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+    report = diagnose_environment(tmp_path)
+    assert report.stale_count >= 20
+    assert any("mempalace sweep" in issue for issue in report.issues)

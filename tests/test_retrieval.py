@@ -327,3 +327,160 @@ def test_search_auto_syncs_new_essence(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     data = json.loads(result.output)
     assert any(h["source_ref"] == "2026-09-06-dynamic-rule" for h in data["hits"])
+
+
+def test_readme_excluded_and_is_stale_resolved(workspace: Path, db_path: Path) -> None:
+    """README.md in MemPalace/essences/ is ignored by ingest and does not trigger is_stale."""
+    from mempalace import reconcile
+
+    readme = workspace / "MemPalace" / "essences" / "README.md"
+    readme.write_text("# Essences README\nNot an essence record.\n", encoding="utf-8")
+
+    conn = _connect(db_path)
+    try:
+        ingest.ingest_all(conn, workspace)
+        slugs = {row[0] for row in conn.execute("SELECT slug FROM wisdom").fetchall()}
+        assert "README" not in slugs
+        assert "readme" not in slugs
+        assert ingest.is_stale(conn, workspace) is False
+        drift = reconcile.reconcile(conn, workspace)
+        assert drift.files_without_row == []
+    finally:
+        conn.close()
+
+
+def test_sessions_jsonl_roundtrip_and_rebuild(tmp_path: Path) -> None:
+    """sessions.jsonl persists episodic sessions and restores them into a fresh DB."""
+    from mempalace.config import sessions_jsonl_path
+
+    (tmp_path / "MemPalace" / "essences").mkdir(parents=True)
+    ingest.append_or_update_session_jsonl(
+        tmp_path,
+        session_id="2026-09-28-tool-fix",
+        timestamp="2026-09-28 12:00:00",
+        summary="Initial summary",
+        tags=["tools"],
+    )
+    assert sessions_jsonl_path(tmp_path).exists()
+
+    # Upsert same session_id in-place
+    ingest.append_or_update_session_jsonl(
+        tmp_path,
+        session_id="2026-09-28-tool-fix",
+        timestamp="2026-09-28 12:30:00",
+        summary="Updated cohesive tool registration",
+        tags=["tools", "lifecycle"],
+    )
+
+    fresh_db = tmp_path / "rebuilt.sqlite"
+    conn = _connect(fresh_db)
+    try:
+        rep = ingest.ingest_all(conn, tmp_path, migrate=False)
+        assert rep.sessions_migrated == 1
+        row = conn.execute(
+            "SELECT timestamp, summary, status FROM sessions WHERE session_id = ?",
+            ("2026-09-28-tool-fix",),
+        ).fetchone()
+        assert row is not None
+        assert row["timestamp"] == "2026-09-28 12:30:00"
+        assert "cohesive tool" in row["summary"]
+        assert row["status"] == "active"
+
+        hits = retrieval.search_bm25(conn, "cohesive tool registration", limit=3)
+        assert any(h.source_ref == "2026-09-28-tool-fix" for h in hits)
+    finally:
+        conn.close()
+
+
+def test_scan_and_reconcile_workspace_tools_cohesive_and_tombstone(tmp_path: Path) -> None:
+    """Cohesive tools/<subdir>/ and polyglot scripts/* support full CRUD + tombstoning."""
+    pkg_dir = tmp_path / "tools" / "pdf_converter"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "SKILL.md").write_text(
+        "---\nname: pdf-converter\ndescription: Convert HTML documents to PDF.\n---\n",
+        encoding="utf-8",
+    )
+    (pkg_dir / "__init__.py").write_text('"""Ignored inner init."""\n', encoding="utf-8")
+    (pkg_dir / "main.py").write_text('"""Ignored inner main."""\n', encoding="utf-8")
+
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir(parents=True)
+    deploy_ps1 = scripts_dir / "deploy.ps1"
+    deploy_ps1.write_text(
+        "<#\n.SYNOPSIS\nDeploy release artifacts to staging.\n#>\nWrite-Host 'ok'\n",
+        encoding="utf-8",
+    )
+    backup_sh = scripts_dir / "backup.sh"
+    backup_sh.write_text(
+        "#!/usr/bin/env bash\n# @description: Backup SQLite memory store.\necho ok\n",
+        encoding="utf-8",
+    )
+
+    conn = _connect(tmp_path / "tools.sqlite")
+    try:
+        discovered, upserted, tombstoned = ingest.reconcile_workspace_tools(conn, tmp_path)
+        assert (discovered, upserted, tombstoned) == (3, 3, 0)
+
+        rows = {
+            r["name"]: (r["description"], r["status"])
+            for r in conn.execute("SELECT name, description, status FROM tool_registry").fetchall()
+        }
+        assert set(rows.keys()) == {"pdf_converter", "deploy", "backup"}
+        assert "Convert HTML documents to PDF." in rows["pdf_converter"][0]
+        assert "Deploy release artifacts to staging." in rows["deploy"][0]
+        assert "Backup SQLite memory store." in rows["backup"][0]
+        assert all(status == "active" for _, status in rows.values())
+
+        # Modify backup.sh and delete deploy.ps1
+        backup_sh.write_text(
+            "#!/usr/bin/env bash\n# @description: Incremental backup of SQLite store.\necho ok\n",
+            encoding="utf-8",
+        )
+        deploy_ps1.unlink()
+
+        discovered2, upserted2, tombstoned2 = ingest.reconcile_workspace_tools(conn, tmp_path)
+        assert (discovered2, upserted2, tombstoned2) == (2, 1, 1)
+
+        rows_after = {
+            r["name"]: (r["description"], r["status"])
+            for r in conn.execute("SELECT name, description, status FROM tool_registry").fetchall()
+        }
+        assert rows_after["backup"] == ("Incremental backup of SQLite store.", "active")
+        assert rows_after["deploy"][1] == "removed"
+    finally:
+        conn.close()
+
+
+def test_two_tier_retrieval_and_vector_eviction(ingested: Path, workspace: Path) -> None:
+    """Non-active records are excluded by default, have vectors evicted, and show with flag."""
+    conn = _connect(ingested)
+    fake = FakeEmbedder()
+    try:
+        retrieval.ensure_vectors(conn, fake)
+        vec_before = conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()[0]
+        assert int(vec_before) == 4
+
+        # Mark ADR-001 as superseded
+        adr_file = workspace / "docs" / "decisions" / "ADR-001-sample.md"
+        adr_file.write_text(
+            "# ADR-001: Sample Decision\n\nDate: 2026-09-01\nStatus: superseded\n"
+            "Tags: sample, test\n\n## Context\nExample decision used only by tests.\n",
+            encoding="utf-8",
+        )
+        ingest.ingest_all(conn, workspace)
+
+        # Vector for superseded ADR-001 is automatically evicted
+        vec_after = conn.execute("SELECT COUNT(*) FROM doc_vectors").fetchone()[0]
+        assert int(vec_after) == 3
+
+        # Default search excludes superseded ADR-001
+        active_hits = retrieval.search_bm25(conn, "Sample Decision", limit=5)
+        assert all(h.source_ref != "ADR-001" for h in active_hits)
+
+        # include_archived=True returns superseded ADR-001
+        archived_hits = retrieval.search_bm25(
+            conn, "Sample Decision", limit=5, include_archived=True
+        )
+        assert any(h.source_ref == "ADR-001" for h in archived_hits)
+    finally:
+        conn.close()
