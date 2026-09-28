@@ -51,9 +51,12 @@ _SCRIPT_EXTS = (".py", ".ps1", ".sh", ".bash")
 _TS_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
-def _now() -> str:
+def now_utc() -> str:
     """Return the current UTC timestamp as an ISO-like string."""
     return datetime.now(UTC).strftime(_TS_FORMAT)
+
+
+_now = now_utc
 
 
 def _strip_quotes(val: str) -> str:

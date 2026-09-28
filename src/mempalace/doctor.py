@@ -40,6 +40,9 @@ class DoctorReport:
     vectors_indexed: int = 0
     essences_count: int = 0
     decisions_count: int = 0
+    sessions_count: int = 0
+    tools_count: int = 0
+    stale_count: int = 0
     all_ok: bool = True
     issues: list[str] = field(default_factory=_empty_str_list)
 
@@ -73,6 +76,8 @@ def diagnose_environment(workspace: Path | None = None) -> DoctorReport:
     Returns:
         DoctorReport containing status of all checks.
     """
+    from mempalace.ingest import ADR_FILE_RE
+
     ws = config.resolve_workspace(str(workspace) if workspace else None)
     issues: list[str] = []
 
@@ -98,11 +103,14 @@ def diagnose_environment(workspace: Path | None = None) -> DoctorReport:
     if not fe_ok:
         issues.append("`fastembed` package is not installed or importable.")
 
-    # 5. Workspace DB & essences inspection
+    # 5. Workspace DB & 4-entity inspection
     db_file = config.resolve_db(ws, None)
     db_exists = db_file.exists()
     docs_indexed = 0
     vectors_indexed = 0
+    sessions_count = 0
+    tools_count = 0
+    stale_count = 0
 
     if db_exists:
         try:
@@ -115,23 +123,45 @@ def diagnose_environment(workspace: Path | None = None) -> DoctorReport:
             cur.execute("SELECT COUNT(*) FROM doc_vectors")
             vrow = cur.fetchone()
             vectors_indexed = int(vrow[0]) if vrow else 0
+
+            cur.execute("SELECT COUNT(*) FROM sessions")
+            srow = cur.fetchone()
+            sessions_count = int(srow[0]) if srow else 0
+
+            cur.execute("SELECT COUNT(*) FROM tool_registry")
+            trow = cur.fetchone()
+            tools_count = int(trow[0]) if trow else 0
+
+            stale_count = storage.count_stale_docs(conn)
             conn.close()
+            if stale_count >= config.HYGIENE_STALE_THRESHOLD:
+                issues.append(
+                    f"Workspace has {stale_count} stale/archived records "
+                    f"(threshold >= {config.HYGIENE_STALE_THRESHOLD}). "
+                    "Run 'mempalace sweep' to evict stale vectors and compact FTS5."
+                )
         except Exception as exc:
             issues.append(f"Database at {db_file} could not be read: {exc}")
     else:
         issues.append(f"MemPalace database not found at {db_file}. Run 'mempalace init-workspace'.")
 
-    # Essences count on disk
+    # Essences count on disk (excluding meta files)
     essence_dir = config.essence_dir(ws)
     essences_count = 0
     if essence_dir.exists():
-        essences_count = len(list(essence_dir.glob("*.md")))
+        essences_count = len(
+            [
+                f
+                for f in essence_dir.glob("*.md")
+                if f.name.lower() not in ("template.md", "readme.md")
+            ]
+        )
 
-    # Decisions count on disk
+    # Decisions count on disk (matching ADR-NNN-*.md)
     dec_dir = config.decisions_dir(ws)
     decisions_count = 0
     if dec_dir.exists():
-        decisions_count = len(list(dec_dir.glob("*.md")))
+        decisions_count = len([f for f in dec_dir.glob("ADR-*.md") if ADR_FILE_RE.match(f.name)])
 
     all_ok = py_ok and fts5_ok and fe_ok and db_exists and len(issues) == 0
 
@@ -150,6 +180,9 @@ def diagnose_environment(workspace: Path | None = None) -> DoctorReport:
         vectors_indexed=vectors_indexed,
         essences_count=essences_count,
         decisions_count=decisions_count,
+        sessions_count=sessions_count,
+        tools_count=tools_count,
+        stale_count=stale_count,
         all_ok=all_ok,
         issues=issues,
     )

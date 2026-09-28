@@ -313,21 +313,29 @@ def sync(
     workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
     db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
 ) -> None:
-    """Upsert a session record (AGENTS.md parity) and refresh the search index."""
+    """Upsert a session record (persisting to MemPalace/sessions.jsonl and SQLite)."""
+    ws = config.resolve_workspace(workspace)
     _, conn = _open_db(db, workspace)
     tag_list = [tag.strip() for tag in tags.split(",") if tag.strip()]
+    now = ingest_mod.now_utc()
+    ingest_mod.append_or_update_session_jsonl(
+        ws, session_id, now, summary, tag_list, status="active"
+    )
     try:
+        storage.ensure_status_columns(conn)
         conn.execute(
-            "INSERT INTO sessions (session_id, summary, tags) VALUES (?, ?, ?) "
+            "INSERT INTO sessions (session_id, timestamp, summary, tags, status) "
+            "VALUES (?, ?, ?, ?, 'active') "
             "ON CONFLICT(session_id) DO UPDATE SET "
-            "summary = excluded.summary, tags = excluded.tags",
-            (session_id, summary, tags_to_json(tag_list)),
+            "timestamp = excluded.timestamp, summary = excluded.summary, "
+            "tags = excluded.tags, status = 'active'",
+            (session_id, now, summary, tags_to_json(tag_list)),
         )
         conn.commit()
         indexed = storage.sync_search_index(conn)
     finally:
         conn.close()
-    _emit({"session_id": session_id, "docs_indexed": indexed})
+    _emit({"session_id": session_id, "timestamp": now, "docs_indexed": indexed})
 
 
 @app.command()
@@ -346,6 +354,13 @@ def search(
     category: Annotated[
         str | None, typer.Option(help="Filter by category (pitfall/preference/thinking_style)")
     ] = None,
+    include_archived: Annotated[
+        bool,
+        typer.Option(
+            "--include-archived",
+            help="Include superseded, deprecated, archived, and removed records",
+        ),
+    ] = False,
     model: Annotated[str, typer.Option(help="fastembed model name")] = config.DEFAULT_MODEL,
     no_embed: Annotated[bool, typer.Option(help="Never attempt embeddings (bm25 only)")] = False,
     workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
@@ -367,6 +382,7 @@ def search(
             source_kind=source,
             category=category,
             embedder=None if no_embed else Embedder(model_name=model),
+            include_archived=include_archived,
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
@@ -387,6 +403,22 @@ def reconcile(
     _, conn = _open_db(db, workspace)
     try:
         report = reconcile_mod.reconcile(conn, ws)
+    finally:
+        conn.close()
+    _emit(report.to_dict())
+
+
+@app.command()
+def sweep(
+    workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
+    db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
+) -> None:
+    """Evict dense vectors for non-active documents and optimize the FTS5 index."""
+    ws = config.resolve_workspace(workspace)
+    _, conn = _open_db(db, workspace)
+    try:
+        ingest_mod.ensure_fresh_index(conn, ws)
+        report = storage.run_hygiene_sweep(conn)
     finally:
         conn.close()
     _emit(report.to_dict())
@@ -415,26 +447,23 @@ def register_tools(
     workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
     db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
 ) -> None:
-    """Discover workspace scripts/tools and insert any not already registered."""
+    """Discover workspace scripts/tools, upsert changes, and tombstone removed tools."""
     ws = config.resolve_workspace(workspace)
     _, conn = _open_db(db, workspace)
-    found = ingest_mod.scan_workspace_tools(ws)
-    existing = {str(row[0]) for row in conn.execute("SELECT name FROM tool_registry").fetchall()}
-    added = 0
     try:
-        for name, path, description in found:
-            if name in existing:
-                continue
-            conn.execute(
-                "INSERT INTO tool_registry (name, path, description) VALUES (?, ?, ?)",
-                (name, path, description),
-            )
-            added += 1
-        conn.commit()
+        discovered, upserted, tombstoned = ingest_mod.reconcile_workspace_tools(conn, ws)
         indexed = storage.sync_search_index(conn)
     finally:
         conn.close()
-    _emit({"discovered": len(found), "inserted": added, "docs_indexed": indexed})
+    _emit(
+        {
+            "discovered": discovered,
+            "inserted": upserted,
+            "upserted": upserted,
+            "tombstoned": tombstoned,
+            "docs_indexed": indexed,
+        }
+    )
 
 
 @app.command()
@@ -464,6 +493,7 @@ def _run_list(
     _, conn = _open_db(db, workspace)
     try:
         ingest_mod.ensure_fresh_index(conn, ws)
+        storage.ensure_status_columns(conn)
         # 1. Fetch search_docs vector coverage
         vec_doc_ids = {
             int(r["doc_id"]) for r in conn.execute("SELECT doc_id FROM doc_vectors").fetchall()
@@ -476,7 +506,10 @@ def _run_list(
                 "SELECT doc_id, source_ref FROM search_docs WHERE source_kind = 'wisdom'"
             ).fetchall()
         }
-        wisdom_sql = "SELECT slug, category, timestamp, source_path FROM wisdom"
+        wisdom_sql = (
+            "SELECT slug, category, timestamp, source_path, COALESCE(status, 'active') AS status "
+            "FROM wisdom"
+        )
         wisdom_params: list[object] = []
         if category:
             wisdom_sql += " WHERE category = ?"
@@ -499,6 +532,7 @@ def _run_list(
                 {
                     "slug": slug,
                     "category": r["category"],
+                    "status": str(r["status"]),
                     "timestamp": r["timestamp"],
                     "path": rel_path,
                     "has_vector": has_vec,
@@ -532,6 +566,7 @@ def _run_list(
         session_count = int(conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0])
         tool_count = int(conn.execute("SELECT COUNT(*) FROM tool_registry").fetchone()[0])
         total_docs = int(conn.execute("SELECT COUNT(*) FROM search_docs").fetchone()[0])
+        stale_count = storage.count_stale_docs(conn)
     finally:
         conn.close()
 
@@ -544,6 +579,7 @@ def _run_list(
                 "decisions": decisions,
                 "sessions_count": session_count,
                 "tools_count": tool_count,
+                "stale_count": stale_count,
                 "total_docs": total_docs,
             }
         )
@@ -554,7 +590,7 @@ def _run_list(
     typer.echo(f"  Workspace: {ws}")
     typer.echo(
         f"  Total Indexed Documents: {total_docs} "
-        f"(Sessions: {session_count}, Tools: {tool_count})\n"
+        f"(Sessions: {session_count}, Tools: {tool_count}, Stale: {stale_count})\n"
     )
 
     typer.secho(f"🧠 Essences ({len(essences)}):", fg=typer.colors.YELLOW, bold=True)
@@ -668,7 +704,9 @@ def doctor(
     if report.db_exists:
         doc_stats = (
             f"Indexed Docs:  {report.docs_indexed} "
-            f"(Essences: {report.essences_count}, ADRs: {report.decisions_count})"
+            f"(Essences: {report.essences_count}, ADRs: {report.decisions_count}, "
+            f"Sessions: {report.sessions_count}, Tools: {report.tools_count}, "
+            f"Stale: {report.stale_count})"
         )
         typer.echo(f"     {doc_stats}")
         typer.echo(f"     Dense Vectors: {report.vectors_indexed}")
