@@ -14,17 +14,18 @@ Validates:
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from pathlib import Path
 
 from mempalace import ingest
+from mempalace.models import CATEGORY_VALUES
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 ESSENCES_DIR = WORKSPACE_ROOT / "MemPalace" / "essences"
 DECISIONS_DIR = WORKSPACE_ROOT / "docs" / "decisions"
 
-VALID_ESSENCE_CATEGORIES = {"preference", "pitfall", "thinking_style"}
 VALID_ESSENCE_STATUSES = {"active", "accepted", "superseded", "deprecated", "archived"}
 VALID_ADR_STATUSES = {
     "draft",
@@ -36,7 +37,6 @@ VALID_ADR_STATUSES = {
     "superseded",
 }
 
-_STATUS_LINE_RE = re.compile(r"^\s*(?:\*\*Status\*\*|Status)\s*:\s*([A-Za-z_-]+)", re.M | re.I)
 _SUPERSEDES_RE = re.compile(r"^\s*(?:\*\*Supersedes\*\*|Supersedes)\s*:\s*(.+)$", re.M | re.I)
 _SUPERSEDED_BY_RE = re.compile(
     r"^\s*(?:\*\*Superseded[- ]by\*\*|Superseded[- ]by)\s*:\s*(.+)$", re.M | re.I
@@ -54,13 +54,6 @@ def _extract_adr_refs(text: str, pattern: re.Pattern[str]) -> list[str]:
     return _ADR_ID_RE.findall(raw.upper())
 
 
-def _extract_adr_status(text: str) -> str:
-    match = _STATUS_LINE_RE.search(text)
-    if not match:
-        return "active"
-    return match.group(1).strip().lower()
-
-
 def validate_essences(essences_dir: Path = ESSENCES_DIR) -> list[str]:
     """Validate essence files in MemPalace/essences/."""
     errors: list[str] = []
@@ -71,10 +64,10 @@ def validate_essences(essences_dir: Path = ESSENCES_DIR) -> list[str]:
         if path.name.lower() in {"readme.md", "template.md"}:
             continue
         rec = ingest.parse_essence(path)
-        if rec.category is not None and rec.category not in VALID_ESSENCE_CATEGORIES:
+        if rec.category not in CATEGORY_VALUES:
             errors.append(
-                f"[Essence] Invalid category '{rec.category}' in {path.name}. "
-                f"Expected one of {sorted(VALID_ESSENCE_CATEGORIES)}"
+                f"[Essence] Invalid or missing category '{rec.category}' in {path.name}. "
+                f"Expected one of {sorted(CATEGORY_VALUES)}"
             )
         if rec.status not in VALID_ESSENCE_STATUSES:
             errors.append(
@@ -100,7 +93,7 @@ def validate_adrs(decisions_dir: Path = DECISIONS_DIR) -> list[str]:
             continue
         adr_id = match.group(1).upper()
         raw = path.read_text(encoding="utf-8")
-        status = _extract_adr_status(raw)
+        _, status, _ = ingest.extract_adr_metadata(raw.splitlines())
         records[adr_id] = (path, status, raw)
         if status not in VALID_ADR_STATUSES:
             errors.append(
@@ -147,16 +140,36 @@ def validate_adrs(decisions_dir: Path = DECISIONS_DIR) -> list[str]:
     return errors
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Run governance validation across essences and ADRs."""
-    print("=== MemPalace Governance & Lifecycle Verification ===")
+    args = argv if argv is not None else sys.argv[1:]
     all_errors = validate_essences() + validate_adrs()
+    if "--agent" in args:
+        if all_errors:
+            print(
+                json.dumps(
+                    {
+                        "error": True,
+                        "code": "GOVERNANCE_VALIDATION_FAILED",
+                        "message": f"Validation failed with {len(all_errors)} error(s)",
+                        "errors": all_errors,
+                    }
+                ),
+                file=sys.stderr,
+            )
+            return 1
+        print(json.dumps({"ok": True, "errors": []}))
+        return 0
+
     if all_errors:
-        print(f"\n[FAIL] Validation failed with {len(all_errors)} error(s):")
+        print(
+            f"[FAIL] Validation failed with {len(all_errors)} error(s):",
+            file=sys.stderr,
+        )
         for err in all_errors:
-            print(f"  - {err}")
+            print(f"  - {err}", file=sys.stderr)
         return 1
-    print("\n[OK] All essences and ADRs passed schema and lifecycle validation.")
+    print("[OK] All essences and ADRs passed schema and lifecycle validation.")
     return 0
 
 

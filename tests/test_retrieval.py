@@ -481,6 +481,107 @@ def test_two_tier_retrieval_and_vector_eviction(ingested: Path, workspace: Path)
         archived_hits = retrieval.search_bm25(
             conn, "Sample Decision", limit=5, include_archived=True
         )
-        assert any(h.source_ref == "ADR-001" for h in archived_hits)
+        assert any(
+            h.source_ref == "ADR-001" and h.to_dict()["status"] == "superseded"
+            for h in archived_hits
+        )
+    finally:
+        conn.close()
+
+
+def test_duckdb_migration_with_existing_jsonl_and_rebuild_durability(tmp_path: Path) -> None:
+    """Legacy DuckDB sessions/tools migrate even when sessions.jsonl is non-empty and survive rebuilds."""
+    import duckdb
+
+    from mempalace.config import legacy_duckdb_path
+
+    # 1. Pre-existing session in sessions.jsonl (e.g. from mempalace sync before first ingest)
+    ingest.append_or_update_session_jsonl(
+        tmp_path,
+        session_id="2026-09-29-new-sync",
+        timestamp="2026-09-29 10:00:00",
+        summary="Synced before initial ingest",
+        tags=["sync"],
+    )
+
+    # 2. Legacy DuckDB with a historical session and a legacy tool
+    duck_file = legacy_duckdb_path(tmp_path)
+    duck_file.parent.mkdir(parents=True, exist_ok=True)
+    with duckdb.connect(str(duck_file)) as legacy:
+        legacy.execute(
+            "CREATE TABLE sessions (session_id VARCHAR, timestamp VARCHAR, summary VARCHAR, tags VARCHAR)"
+        )
+        legacy.execute(
+            "INSERT INTO sessions VALUES ('2026-04-01-legacy', '2026-04-01 09:00:00', "
+            "'Legacy duckdb session summary', '[\"legacy\"]')"
+        )
+        legacy.execute(
+            "CREATE TABLE tool_registry (name VARCHAR, path VARCHAR, description VARCHAR)"
+        )
+        legacy.execute(
+            "INSERT INTO tool_registry VALUES ('legacy_helper', '', 'Legacy registered tool')"
+        )
+
+    # 3. Also add an on-disk script to verify ingest_all reconciles workspace tools
+    scripts_dir = tmp_path / "scripts"
+    scripts_dir.mkdir(parents=True)
+    (scripts_dir / "check_env.py").write_text(
+        '"""Verify local runtime environment."""\n', encoding="utf-8"
+    )
+
+    db1 = tmp_path / "first.sqlite"
+    conn1 = _connect(db1)
+    try:
+        rep = ingest.ingest_all(conn1, tmp_path, migrate=True)
+        assert rep.sessions_migrated == 2
+        assert rep.tools_upserted == 2
+        sids = {
+            str(r["session_id"])
+            for r in conn1.execute("SELECT session_id FROM sessions").fetchall()
+        }
+        assert sids == {"2026-09-29-new-sync", "2026-04-01-legacy"}
+        tnames = {
+            str(r["name"]) for r in conn1.execute("SELECT name FROM tool_registry").fetchall()
+        }
+        assert tnames == {"legacy_helper", "check_env"}
+    finally:
+        conn1.close()
+
+    # 4. Retire legacy DuckDB and rebuild SQLite from disk sources alone
+    duck_file.unlink()
+    db2 = tmp_path / "rebuilt.sqlite"
+    conn2 = _connect(db2)
+    try:
+        ingest.ingest_all(conn2, tmp_path, migrate=True)
+        rebuilt_sids = {
+            str(r["session_id"])
+            for r in conn2.execute("SELECT session_id FROM sessions").fetchall()
+        }
+        assert rebuilt_sids == {"2026-09-29-new-sync", "2026-04-01-legacy"}
+    finally:
+        conn2.close()
+
+
+def test_adr_deletion_and_bold_status_resolve_is_stale(workspace: Path, db_path: Path) -> None:
+    """Deleting an ADR removes its DB row and bold **Status**: headers parse without staleness."""
+    adr2 = workspace / "docs" / "decisions" / "ADR-002-temp.md"
+    adr2.write_text(
+        "# ADR-002: Temp Decision\n\n**Date**: 2026-09-02\n**Status**: superseded\n\n## Context\nTemp.\n",
+        encoding="utf-8",
+    )
+    conn = _connect(db_path)
+    try:
+        ingest.ingest_all(conn, workspace)
+        row = conn.execute("SELECT status FROM decisions WHERE id = 'ADR-002'").fetchone()
+        assert row is not None and str(row["status"]) == "superseded"
+        assert ingest.is_stale(conn, workspace) is False
+
+        # Delete ADR-002 from disk and verify is_stale detects then resolves after ingest_all
+        adr2.unlink()
+        assert ingest.is_stale(conn, workspace) is True
+        ingest.ingest_all(conn, workspace)
+        assert ingest.is_stale(conn, workspace) is False
+        ids = {str(r["id"]) for r in conn.execute("SELECT id FROM decisions").fetchall()}
+        assert "ADR-002" not in ids
     finally:
         conn.close()

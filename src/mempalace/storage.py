@@ -73,6 +73,7 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     if text_path != ":memory:":
         conn.execute("PRAGMA journal_mode = WAL")
+    ensure_status_columns(conn)
     return conn
 
 
@@ -193,7 +194,6 @@ def sync_search_index(conn: sqlite3.Connection) -> int:
 
     Returns the number of documents present after the sync.
     """
-    ensure_status_columns(conn)
     existing_rows = conn.execute(
         "SELECT doc_id, source_kind, source_ref, title, body, category, status FROM search_docs"
     ).fetchall()
@@ -266,12 +266,15 @@ def sync_search_index(conn: sqlite3.Connection) -> int:
                 "INSERT INTO search_docs_fts (rowid, title, body) VALUES (?, ?, ?)",
                 (doc_id, title, body),
             )
-            if status not in ACTIVE_STATUSES:
-                conn.execute("DELETE FROM doc_vectors WHERE doc_id = ?", (doc_id,))
-                _delete_vec_row(conn, doc_id)
         else:
             doc_id, old_title, old_body, old_category, old_status = prior
-            if (old_title, old_body, old_category, old_status) != (title, body, category, status):
+            changed = (old_title, old_body, old_category, old_status) != (
+                title,
+                body,
+                category,
+                status,
+            )
+            if changed:
                 conn.execute(
                     "UPDATE search_docs SET title = ?, body = ?, category = ?, status = ? "
                     "WHERE doc_id = ?",
@@ -282,10 +285,7 @@ def sync_search_index(conn: sqlite3.Connection) -> int:
                     "INSERT INTO search_docs_fts (rowid, title, body) VALUES (?, ?, ?)",
                     (doc_id, title, body),
                 )
-                # Content or status changed: invalidate embeddings so `embed` recomputes them.
-                conn.execute("DELETE FROM doc_vectors WHERE doc_id = ?", (doc_id,))
-                _delete_vec_row(conn, doc_id)
-            elif status not in ACTIVE_STATUSES:
+            if changed or status not in ACTIVE_STATUSES:
                 conn.execute("DELETE FROM doc_vectors WHERE doc_id = ?", (doc_id,))
                 _delete_vec_row(conn, doc_id)
 
@@ -303,7 +303,6 @@ def sync_search_index(conn: sqlite3.Connection) -> int:
 
 def count_stale_docs(conn: sqlite3.Connection) -> int:
     """Return the count of non-active (superseded, deprecated, archived, removed) documents."""
-    ensure_status_columns(conn)
     placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
     sql = (
         f"SELECT COUNT(*) FROM search_docs WHERE COALESCE(status, 'active') NOT IN ({placeholders})"
@@ -314,7 +313,6 @@ def count_stale_docs(conn: sqlite3.Connection) -> int:
 
 def run_hygiene_sweep(conn: sqlite3.Connection) -> SweepReport:
     """Evict dense vectors for non-active documents and optimize the FTS5 index."""
-    ensure_status_columns(conn)
     placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
     sql = f"SELECT doc_id FROM search_docs WHERE COALESCE(status, 'active') NOT IN ({placeholders})"
     non_active_rows = conn.execute(sql, ACTIVE_STATUSES).fetchall()

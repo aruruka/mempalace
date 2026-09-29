@@ -15,7 +15,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
-from mempalace import storage
 from mempalace.config import (
     decisions_dir,
     essence_dir,
@@ -130,7 +129,6 @@ def parse_essence(path: Path) -> Essence:
 
 def ingest_wisdom(conn: sqlite3.Connection, essences_path: Path) -> int:
     """Full-sync wisdom rows from essence files; returns the file count."""
-    storage.ensure_status_columns(conn)
     if not essences_path.exists():
         return 0
     files = [
@@ -186,7 +184,7 @@ def _extract_title(lines: list[str], fallback: str) -> str:
     return fallback.replace("-", " ").title()
 
 
-def _extract_metadata(lines: list[str]) -> tuple[str | None, str, list[str]]:
+def extract_adr_metadata(lines: list[str]) -> tuple[str | None, str, list[str]]:
     """Extract date/status/tags from ADR frontmatter or header lines."""
     decision_date: str | None = None
     status = "active"
@@ -194,7 +192,9 @@ def _extract_metadata(lines: list[str]) -> tuple[str | None, str, list[str]]:
     in_tags_list = False
     for raw in lines:
         line = raw.strip()
-        lowered = line.lower()
+        if line.startswith("## "):
+            break
+        lowered = line.replace("**", "").strip().lower()
         if in_tags_list:
             if line.startswith("- "):
                 item = _strip_quotes(line[2:].strip())
@@ -222,9 +222,14 @@ def _extract_metadata(lines: list[str]) -> tuple[str | None, str, list[str]]:
     return decision_date, status, tags
 
 
+_extract_metadata = extract_adr_metadata
+
+
 def ingest_decisions(conn: sqlite3.Connection, decisions_path: Path) -> int:
-    """Upsert decision rows from ADR files; returns the file count."""
+    """Full-sync decision rows from ADR files; returns the file count."""
     if not decisions_path.exists():
+        conn.execute("DELETE FROM decisions")
+        conn.commit()
         return 0
     entries: list[tuple[str, str, str, str, str | None, str]] = []
     for file_path in sorted(decisions_path.glob("ADR-*.md")):
@@ -247,6 +252,10 @@ def ingest_decisions(conn: sqlite3.Connection, decisions_path: Path) -> int:
                 tags_to_json(tags),
             )
         )
+    current_ids = {entry[0] for entry in entries}
+    for row in conn.execute("SELECT id FROM decisions").fetchall():
+        if str(row["id"]) not in current_ids:
+            conn.execute("DELETE FROM decisions WHERE id = ?", (row["id"],))
     for entry in entries:
         conn.execute(
             """
@@ -272,6 +281,7 @@ def append_or_update_session_jsonl(
     summary: str,
     tags: list[str],
     status: str = "active",
+    overwrite: bool = True,
 ) -> None:
     """Persist a session record to ``MemPalace/sessions.jsonl`` (idempotent upsert)."""
     jsonl_file = sessions_jsonl_path(workspace)
@@ -290,6 +300,8 @@ def append_or_update_session_jsonl(
             if isinstance(loaded, dict):
                 item = cast(dict[str, object], loaded)
                 if str(item.get("session_id", "")) == session_id:
+                    if not overwrite:
+                        return
                     item["timestamp"] = timestamp
                     item["summary"] = summary
                     item["tags"] = tags
@@ -312,7 +324,6 @@ def append_or_update_session_jsonl(
 
 def ingest_sessions_jsonl(conn: sqlite3.Connection, jsonl_path: Path) -> int:
     """Upsert session rows from ``MemPalace/sessions.jsonl``; returns count upserted."""
-    storage.ensure_status_columns(conn)
     if not jsonl_path.exists():
         return 0
     count = 0
@@ -352,19 +363,25 @@ def ingest_sessions_jsonl(conn: sqlite3.Connection, jsonl_path: Path) -> int:
     return count
 
 
-def migrate_sessions_tools(conn: sqlite3.Connection, duckdb_path: Path) -> tuple[int, int]:
+def migrate_sessions_tools(
+    conn: sqlite3.Connection, duckdb_path: Path, workspace: Path | None = None
+) -> tuple[int, int]:
     """Migrate sessions + tool_registry from the legacy DuckDB store (idempotent).
 
-    Returns ``(session_count, tool_count)`` migrated. Skipped when the DuckDB
-    file is absent. Requires the ``duckdb`` package (a project dependency).
+    Persists migrated legacy sessions into ``MemPalace/sessions.jsonl`` (without
+    overwriting newer JSONL entries) so episodic history survives SQLite rebuilds.
+    Returns ``(session_count, tool_count)`` newly migrated.
     """
     if not duckdb_path.exists():
         return 0, 0
     import duckdb
 
-    storage.ensure_status_columns(conn)
+    ws = workspace or (
+        duckdb_path.parent.parent if duckdb_path.parent.name == "MemPalace" else duckdb_path.parent
+    )
     session_count = 0
     tool_count = 0
+    now = _now()
     with duckdb.connect(str(duckdb_path), read_only=True) as legacy:
         table_rows = legacy.execute("SELECT table_name FROM information_schema.tables").fetchall()
         names = {str(row[0]) for row in table_rows}
@@ -375,31 +392,38 @@ def migrate_sessions_tools(conn: sqlite3.Connection, duckdb_path: Path) -> tuple
                 "FROM sessions"
             ).fetchall()
             for session_id, timestamp, summary, tags in rows:
-                tags_text = str(tags) if tags is not None else None
-                conn.execute(
-                    "INSERT OR REPLACE INTO sessions "
+                sid = str(session_id or "").strip()
+                if not sid:
+                    continue
+                ts_str = str(timestamp).strip() if timestamp is not None else now
+                summary_str = "" if summary is None else str(summary)
+                tags_list = coerce_tags(tags)
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO sessions "
                     "(session_id, timestamp, summary, tags, status) "
                     "VALUES (?, ?, ?, ?, 'active')",
-                    (
-                        str(session_id),
-                        str(timestamp) if timestamp is not None else None,
-                        summary,
-                        tags_text,
-                    ),
+                    (sid, ts_str, summary_str, tags_to_json(tags_list)),
                 )
-                session_count += 1
+                session_count += int(cur.rowcount or 0)
+                append_or_update_session_jsonl(
+                    ws,
+                    sid,
+                    ts_str,
+                    summary_str,
+                    tags_list,
+                    status="active",
+                    overwrite=False,
+                )
 
         if "tool_registry" in names:
             rows = legacy.execute("SELECT name, path, description FROM tool_registry").fetchall()
             for name, path, description in rows:
-                conn.execute(
-                    "INSERT INTO tool_registry (name, path, description, status) "
-                    "VALUES (?, ?, ?, 'active') "
-                    "ON CONFLICT(name) DO UPDATE SET path = excluded.path, "
-                    "description = excluded.description",
+                cur = conn.execute(
+                    "INSERT OR IGNORE INTO tool_registry (name, path, description, status) "
+                    "VALUES (?, ?, ?, 'active')",
                     (str(name), path, description),
                 )
-                tool_count += 1
+                tool_count += int(cur.rowcount or 0)
     conn.commit()
     return session_count, tool_count
 
@@ -444,30 +468,16 @@ def _extract_tool_description(file_path: Path) -> str:
                 pass
         return _docstring_first_line(text)
 
-    if ext == ".ps1":
-        ps_match = _PS_SYNOPSIS_RE.search(text)
-        if ps_match:
-            syn = " ".join(ps_match.group("synopsis").strip().splitlines()).strip()
-            if syn:
+    if ext in (".ps1", ".sh", ".bash"):
+        if ext == ".ps1" and (ps_match := _PS_SYNOPSIS_RE.search(text)):
+            if syn := " ".join(ps_match.group("synopsis").strip().splitlines()).strip():
                 return syn[:200]
-        for line in text.splitlines():
-            s = line.strip()
-            if s.startswith("#") and not s.startswith("#!"):
-                comment = s.lstrip("#").strip()
-                if comment:
-                    return comment[:200]
-        return ""
-
-    if ext in (".sh", ".bash"):
-        sh_match = _SH_DESC_RE.search(text)
-        if sh_match:
+        if ext in (".sh", ".bash") and (sh_match := _SH_DESC_RE.search(text)):
             return sh_match.group(1).strip()[:200]
         for line in text.splitlines():
             s = line.strip()
-            if s.startswith("#") and not s.startswith("#!"):
-                comment = s.lstrip("#").strip()
-                if comment:
-                    return comment[:200]
+            if s.startswith("#") and not s.startswith("#!") and (comment := s.lstrip("#").strip()):
+                return comment[:200]
         return ""
 
     if ext == ".md":
@@ -595,7 +605,6 @@ def reconcile_workspace_tools(conn: sqlite3.Connection, workspace: Path) -> tupl
 
     Returns ``(discovered_count, upserted_count, tombstoned_count)``.
     """
-    storage.ensure_status_columns(conn)
     found = scan_workspace_tools(workspace)
     found_map = {name: (rel_path, desc) for name, rel_path, desc in found}
 
@@ -650,21 +659,19 @@ def ingest_all(conn: sqlite3.Connection, workspace: Path, migrate: bool = True) 
     """Run the full ingest pipeline over a workspace.
 
     Steps: wisdom from essences, decisions from ADR files, sessions from
-    ``MemPalace/sessions.jsonl`` (plus one-time legacy DuckDB migration), and
-    then a diff-based search-index resync.
+    ``MemPalace/sessions.jsonl``, workspace tools from ``scripts/`` and ``tools/``,
+    idempotent legacy DuckDB migration, and a diff-based search-index resync.
     """
     wisdom_count = ingest_wisdom(conn, essence_dir(workspace))
     decision_count = ingest_decisions(conn, decisions_dir(workspace))
-
     session_count = ingest_sessions_jsonl(conn, sessions_jsonl_path(workspace))
-    tool_count = 0
+    _, tool_count, _ = reconcile_workspace_tools(conn, workspace)
+
     duckdb_path = legacy_duckdb_path(workspace)
     if migrate and duckdb_path.exists():
-        existing_sessions = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
-        if existing_sessions is not None and int(existing_sessions[0]) == 0:
-            mig_sessions, mig_tools = migrate_sessions_tools(conn, duckdb_path)
-            session_count += mig_sessions
-            tool_count += mig_tools
+        mig_sessions, mig_tools = migrate_sessions_tools(conn, duckdb_path, workspace)
+        session_count += mig_sessions
+        tool_count += mig_tools
 
     indexed = sync_search_index(conn)
     return IngestReport(
@@ -677,11 +684,12 @@ def ingest_all(conn: sqlite3.Connection, workspace: Path, migrate: bool = True) 
 
 
 def is_stale(conn: sqlite3.Connection, workspace: Path) -> bool:
-    """Check if on-disk essences, ADRs, or sessions.jsonl differ from SQLite."""
+    """Check if on-disk essences, ADRs, sessions.jsonl, or tools differ from SQLite."""
     edir = essence_dir(workspace)
     ddir = decisions_dir(workspace)
     sfile = sessions_jsonl_path(workspace)
-    if not edir.exists() and not ddir.exists() and not sfile.exists():
+    has_tools_dir = (workspace / "scripts").exists() or (workspace / "tools").exists()
+    if not edir.exists() and not ddir.exists() and not sfile.exists() and not has_tools_dir:
         return False
 
     essence_files = (
@@ -689,10 +697,13 @@ def is_stale(conn: sqlite3.Connection, workspace: Path) -> bool:
         if edir.exists()
         else []
     )
-    file_stems = {f.stem for f in essence_files}
-    wisdom_rows = conn.execute("SELECT slug FROM wisdom WHERE source_path IS NOT NULL").fetchall()
-    wisdom_slugs = {str(row["slug"]) for row in wisdom_rows}
-    if file_stems != wisdom_slugs:
+    disk_essences = {f.stem: parse_essence(f).status for f in essence_files}
+    wisdom_rows = conn.execute(
+        "SELECT slug, COALESCE(status, 'active') AS status "
+        "FROM wisdom WHERE source_path IS NOT NULL"
+    ).fetchall()
+    db_essences = {str(row["slug"]): str(row["status"]) for row in wisdom_rows}
+    if disk_essences != db_essences:
         return True
 
     decision_files = (
@@ -700,18 +711,23 @@ def is_stale(conn: sqlite3.Connection, workspace: Path) -> bool:
         if ddir.exists()
         else []
     )
-    decision_ids_on_disk: set[str] = set()
+    disk_decisions: dict[str, str] = {}
     for f in decision_files:
         m = ADR_FILE_RE.match(f.name)
         if m:
-            decision_ids_on_disk.add(m.group(1))
-    decision_rows = conn.execute("SELECT id FROM decisions").fetchall()
-    decision_ids = {str(row["id"]) for row in decision_rows}
-    if decision_ids_on_disk != decision_ids:
+            _, status, _ = extract_adr_metadata(
+                f.read_text(encoding="utf-8", errors="replace").splitlines()
+            )
+            disk_decisions[m.group(1)] = status
+    decision_rows = conn.execute(
+        "SELECT id, COALESCE(status, 'active') AS status FROM decisions"
+    ).fetchall()
+    db_decisions = {str(row["id"]): str(row["status"]) for row in decision_rows}
+    if disk_decisions != db_decisions:
         return True
 
     if sfile.exists():
-        disk_sessions: set[str] = set()
+        disk_sessions: dict[str, str] = {}
         for raw_line in sfile.read_text(encoding="utf-8", errors="replace").splitlines():
             stripped = raw_line.strip()
             if not stripped:
@@ -719,22 +735,39 @@ def is_stale(conn: sqlite3.Connection, workspace: Path) -> bool:
             try:
                 loaded = json.loads(stripped)
                 if isinstance(loaded, dict):
-                    sid = str(cast(dict[str, object], loaded).get("session_id") or "").strip()
+                    item = cast(dict[str, object], loaded)
+                    sid = str(item.get("session_id") or "").strip()
                     if sid:
-                        disk_sessions.add(sid)
+                        disk_sessions[sid] = (
+                            str(item.get("status") or "active").strip().lower() or "active"
+                        )
             except ValueError:
                 continue
         db_sessions = {
-            str(r["session_id"]) for r in conn.execute("SELECT session_id FROM sessions").fetchall()
+            str(r["session_id"]): str(r["status"])
+            for r in conn.execute(
+                "SELECT session_id, COALESCE(status, 'active') AS status FROM sessions"
+            ).fetchall()
         }
-        if not disk_sessions.issubset(db_sessions):
+        if any(db_sessions.get(sid) != st for sid, st in disk_sessions.items()):
+            return True
+
+    if has_tools_dir:
+        found_tools = {name for name, _, _ in scan_workspace_tools(workspace)}
+        active_db_tools = {
+            str(r["name"])
+            for r in conn.execute(
+                "SELECT name FROM tool_registry WHERE COALESCE(status, 'active') != 'removed'"
+            ).fetchall()
+        }
+        if not found_tools.issubset(active_db_tools):
             return True
 
     return False
 
 
 def ensure_fresh_index(conn: sqlite3.Connection, workspace: Path) -> IngestReport | None:
-    """Reconcile on-disk essences, decisions, and sessions into the DB if drift is detected."""
+    """Reconcile on-disk essences, decisions, sessions, and tools into the DB if stale."""
     if is_stale(conn, workspace):
         return ingest_all(conn, workspace, migrate=False)
     return None

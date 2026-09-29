@@ -59,21 +59,51 @@ def init(
     typer.echo(f"Initialized MemPalace v2 database at {db_path}")
 
 
-def _run_init_workspace(
-    workspace: str | None,
-    agent: str,
-    seed: bool,
-    skills: bool,
-    decisions: bool,
-    scripts: bool,
-    embed: bool,
-    kickoff_file: str,
-    interactive: bool | None,
-    agent_mode: bool,
-    human: bool,
-    dry_run: bool,
+def _rel(path_val: object, ws: Path) -> str:
+    """Format a path relative to the workspace root using forward slashes."""
+    if not path_val:
+        return ""
+    try:
+        return str(Path(str(path_val)).relative_to(ws)).replace("\\", "/")
+    except ValueError:
+        return str(path_val).replace("\\", "/")
+
+
+@app.command(name="init-workspace")
+@app.command(name="setup", help="Alias for init-workspace.")
+def init_workspace(
+    workspace: Annotated[
+        str | None,
+        typer.Option(help="Target workspace root (default: current directory)"),
+    ] = None,
+    agent: Annotated[
+        str,
+        typer.Option(
+            "--agent-flavor",
+            "-a",
+            help="Target agent: opencode, hermes, antigravity, claude, cursor, generic",
+        ),
+    ] = "",
+    seed: Annotated[bool, typer.Option(help="Seed starter essence file")] = True,
+    skills: Annotated[bool, typer.Option(help="Install memory-sync skill")] = True,
+    decisions: Annotated[bool, typer.Option(help="Scaffold docs/decisions")] = True,
+    scripts: Annotated[bool, typer.Option(help="Generate setup-mempalace scripts")] = True,
+    embed: Annotated[bool, typer.Option(help="Compute dense embeddings for memory")] = True,
+    kickoff_file: Annotated[
+        str, typer.Option(help="File path to save kickoff prompt")
+    ] = "MEMPALACE_KICKOFF.md",
+    interactive: Annotated[
+        bool | None, typer.Option(help="Force interactive or non-interactive mode")
+    ] = None,
+    agent_mode: Annotated[
+        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
+    ] = False,
+    human: Annotated[
+        bool, typer.Option("--human", help="Force human-friendly interactive output")
+    ] = False,
+    dry_run: Annotated[bool, typer.Option(help="Preview actions without writing to disk")] = False,
 ) -> None:
-    """Core dispatcher for workspace initialization (shared by init-workspace and setup)."""
+    """Interactive & AI-native wizard to initialize a workspace for MemPalace."""
     if agent_mode:
         is_interactive = False
     elif human:
@@ -189,106 +219,6 @@ def _run_init_workspace(
         _emit(report.to_dict())
 
 
-@app.command(name="init-workspace")
-def init_workspace(
-    workspace: Annotated[
-        str | None,
-        typer.Option(help="Target workspace root (default: current directory)"),
-    ] = None,
-    agent: Annotated[
-        str,
-        typer.Option(
-            "--agent-flavor",
-            "-a",
-            help="Target agent: opencode, hermes, antigravity, claude, cursor, generic",
-        ),
-    ] = "",
-    seed: Annotated[bool, typer.Option(help="Seed starter essence file")] = True,
-    skills: Annotated[bool, typer.Option(help="Install memory-sync skill")] = True,
-    decisions: Annotated[bool, typer.Option(help="Scaffold docs/decisions")] = True,
-    scripts: Annotated[bool, typer.Option(help="Generate setup-mempalace scripts")] = True,
-    embed: Annotated[bool, typer.Option(help="Compute dense embeddings for memory")] = True,
-    kickoff_file: Annotated[
-        str, typer.Option(help="File path to save kickoff prompt")
-    ] = "MEMPALACE_KICKOFF.md",
-    interactive: Annotated[
-        bool | None, typer.Option(help="Force interactive or non-interactive mode")
-    ] = None,
-    agent_mode: Annotated[
-        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
-    ] = False,
-    human: Annotated[
-        bool, typer.Option("--human", help="Force human-friendly interactive output")
-    ] = False,
-    dry_run: Annotated[bool, typer.Option(help="Preview actions without writing to disk")] = False,
-) -> None:
-    """Interactive & AI-native wizard to initialize a workspace for MemPalace."""
-    _run_init_workspace(
-        workspace=workspace,
-        agent=agent,
-        seed=seed,
-        skills=skills,
-        decisions=decisions,
-        scripts=scripts,
-        embed=embed,
-        kickoff_file=kickoff_file,
-        interactive=interactive,
-        agent_mode=agent_mode,
-        human=human,
-        dry_run=dry_run,
-    )
-
-
-@app.command(name="setup")
-def setup(
-    workspace: Annotated[
-        str | None,
-        typer.Option(help="Target workspace root (default: current directory)"),
-    ] = None,
-    agent: Annotated[
-        str,
-        typer.Option(
-            "--agent-flavor",
-            "-a",
-            help="Target agent: opencode, hermes, antigravity, claude, cursor, generic",
-        ),
-    ] = "",
-    seed: Annotated[bool, typer.Option(help="Seed starter essence file")] = True,
-    skills: Annotated[bool, typer.Option(help="Install memory-sync skill")] = True,
-    decisions: Annotated[bool, typer.Option(help="Scaffold docs/decisions")] = True,
-    scripts: Annotated[bool, typer.Option(help="Generate setup-mempalace scripts")] = True,
-    embed: Annotated[bool, typer.Option(help="Compute dense embeddings for memory")] = True,
-    kickoff_file: Annotated[
-        str, typer.Option(help="File path to save kickoff prompt")
-    ] = "MEMPALACE_KICKOFF.md",
-    interactive: Annotated[
-        bool | None, typer.Option(help="Force interactive or non-interactive mode")
-    ] = None,
-    agent_mode: Annotated[
-        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
-    ] = False,
-    human: Annotated[
-        bool, typer.Option("--human", help="Force human-friendly interactive output")
-    ] = False,
-    dry_run: Annotated[bool, typer.Option(help="Preview actions without writing to disk")] = False,
-) -> None:
-    """Alias for init-workspace."""
-    _run_init_workspace(
-        workspace=workspace,
-        agent=agent,
-        seed=seed,
-        skills=skills,
-        decisions=decisions,
-        scripts=scripts,
-        embed=embed,
-        kickoff_file=kickoff_file,
-        interactive=interactive,
-        agent_mode=agent_mode,
-        human=human,
-        dry_run=dry_run,
-    )
-
-
 @app.command()
 def ingest(
     workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
@@ -322,7 +252,6 @@ def sync(
         ws, session_id, now, summary, tag_list, status="active"
     )
     try:
-        storage.ensure_status_columns(conn)
         conn.execute(
             "INSERT INTO sessions (session_id, timestamp, summary, tags, status) "
             "VALUES (?, ?, ?, ?, 'active') "
@@ -458,7 +387,6 @@ def register_tools(
     _emit(
         {
             "discovered": discovered,
-            "inserted": upserted,
             "upserted": upserted,
             "tombstoned": tombstoned,
             "docs_indexed": indexed,
@@ -482,18 +410,27 @@ def register_decisions(
     _emit({"decisions_upserted": count, "docs_indexed": indexed})
 
 
-def _run_list(
-    category: str | None,
-    agent: bool,
-    human: bool,
-    workspace: str | None,
-    db: str | None,
+@app.command(name="list")
+@app.command(name="ls", hidden=True, help="Alias for list.")
+def list_memories(
+    category: Annotated[
+        str | None,
+        typer.Option(help="Filter essences by category (pitfall/preference/thinking_style)"),
+    ] = None,
+    agent: Annotated[
+        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
+    ] = False,
+    human: Annotated[
+        bool, typer.Option("--human", help="Force human-friendly catalog output")
+    ] = False,
+    workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
+    db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
 ) -> None:
+    """List all registered wisdom essences, ADRs, and memory catalog status."""
     ws = config.resolve_workspace(workspace)
     _, conn = _open_db(db, workspace)
     try:
         ingest_mod.ensure_fresh_index(conn, ws)
-        storage.ensure_status_columns(conn)
         # 1. Fetch search_docs vector coverage
         vec_doc_ids = {
             int(r["doc_id"]) for r in conn.execute("SELECT doc_id FROM doc_vectors").fetchall()
@@ -520,22 +457,14 @@ def _run_list(
         for r in conn.execute(wisdom_sql, wisdom_params).fetchall():
             slug = str(r["slug"])
             doc_id = wisdom_docs.get(slug)
-            has_vec = doc_id is not None and doc_id in vec_doc_ids
-            src_p = r["source_path"]
-            rel_path = ""
-            if src_p:
-                try:
-                    rel_path = str(Path(str(src_p)).relative_to(ws)).replace("\\", "/")
-                except ValueError:
-                    rel_path = str(src_p).replace("\\", "/")
             essences.append(
                 {
                     "slug": slug,
                     "category": r["category"],
                     "status": str(r["status"]),
                     "timestamp": r["timestamp"],
-                    "path": rel_path,
-                    "has_vector": has_vec,
+                    "path": _rel(r["source_path"], ws),
+                    "has_vector": doc_id is not None and doc_id in vec_doc_ids,
                 }
             )
 
@@ -544,22 +473,14 @@ def _run_list(
         for r in conn.execute(
             "SELECT id, title, path, status, date, tags FROM decisions ORDER BY id"
         ).fetchall():
-            tag_list = coerce_tags(r["tags"])
-            dec_path = r["path"]
-            rel_dec_path = ""
-            if dec_path:
-                try:
-                    rel_dec_path = str(Path(str(dec_path)).relative_to(ws)).replace("\\", "/")
-                except ValueError:
-                    rel_dec_path = str(dec_path).replace("\\", "/")
             decisions.append(
                 {
                     "id": str(r["id"]),
                     "title": str(r["title"]),
                     "status": str(r["status"]),
                     "date": r["date"],
-                    "tags": tag_list,
-                    "path": rel_dec_path,
+                    "tags": coerce_tags(r["tags"]),
+                    "path": _rel(r["path"], ws),
                 }
             )
 
@@ -613,44 +534,6 @@ def _run_list(
             tags_str = f"tags: {', '.join(d['tags'])}" if d["tags"] else ""
             typer.echo(f"  • {d['id']:<10} {status:<10} {d['title']:<40} {tags_str}")
     typer.echo("")
-
-
-@app.command(name="list")
-def list_memories(
-    category: Annotated[
-        str | None,
-        typer.Option(help="Filter essences by category (pitfall/preference/thinking_style)"),
-    ] = None,
-    agent: Annotated[
-        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
-    ] = False,
-    human: Annotated[
-        bool, typer.Option("--human", help="Force human-friendly catalog output")
-    ] = False,
-    workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
-    db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
-) -> None:
-    """List all registered wisdom essences, ADRs, and memory catalog status."""
-    _run_list(category=category, agent=agent, human=human, workspace=workspace, db=db)
-
-
-@app.command(name="ls", hidden=True)
-def ls_memories(
-    category: Annotated[
-        str | None,
-        typer.Option(help="Filter essences by category (pitfall/preference/thinking_style)"),
-    ] = None,
-    agent: Annotated[
-        bool, typer.Option("--agent", help="Emit JSON output for AI agents (ai-native-cli)")
-    ] = False,
-    human: Annotated[
-        bool, typer.Option("--human", help="Force human-friendly catalog output")
-    ] = False,
-    workspace: Annotated[str | None, typer.Option(help="Workspace root")] = None,
-    db: Annotated[str | None, typer.Option(help="SQLite DB path")] = None,
-) -> None:
-    """Alias for list."""
-    _run_list(category=category, agent=agent, human=human, workspace=workspace, db=db)
 
 
 @app.command()

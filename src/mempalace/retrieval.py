@@ -84,7 +84,6 @@ def _fetch_docs(
     include_archived: bool = False,
 ) -> list[_Doc]:
     """Fetch search documents, optionally filtered by kind/category/active status."""
-    storage.ensure_status_columns(conn)
     sql = (
         "SELECT doc_id, source_kind, source_ref, title, body, category, "
         "COALESCE(status, 'active') AS status FROM search_docs WHERE 1 = 1"
@@ -148,7 +147,6 @@ def _bm25_search(
     include_archived: bool = False,
 ) -> list[SearchHit]:
     """Run one BM25 FTS query (AND or OR expression) with optional filters."""
-    storage.ensure_status_columns(conn)
     sql = (
         "SELECT d.doc_id, d.source_kind, d.source_ref, d.title, d.body, d.category, "
         "COALESCE(d.status, 'active') AS status, "
@@ -233,7 +231,6 @@ def _vector_count(conn: sqlite3.Connection) -> int:
 
 def _doc_count(conn: sqlite3.Connection) -> int:
     """Return the number of active search documents."""
-    storage.ensure_status_columns(conn)
     placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
     row = conn.execute(
         f"SELECT COUNT(*) FROM search_docs WHERE COALESCE(status, 'active') IN ({placeholders})",

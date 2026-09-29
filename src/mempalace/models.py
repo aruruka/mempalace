@@ -72,6 +72,7 @@ class SearchHit:
             "source_ref": self.source_ref,
             "title": self.title,
             "category": self.category,
+            "status": self.status,
             "body": self.body,
         }
 

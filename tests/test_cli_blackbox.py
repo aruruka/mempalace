@@ -228,4 +228,5 @@ def test_blackbox_search_include_archived(workspace: Path, db_path: Path) -> Non
         ["search", "Legacy duckdb storage", "--mode", "bm25", "--include-archived"],
     )
     assert archived_res.returncode == 0, archived_res.stderr
-    assert any(h["source_ref"] == "ADR-002" for h in json.loads(archived_res.stdout)["hits"])
+    hits = json.loads(archived_res.stdout)["hits"]
+    assert any(h["source_ref"] == "ADR-002" and h["status"] == "superseded" for h in hits)
