@@ -65,7 +65,7 @@ def reconcile(conn: sqlite3.Connection, workspace: Path) -> DriftReport:
     essence_files = [
         file_path
         for file_path in sorted(essence_dir(workspace).glob("*.md"))
-        if file_path.name.lower() != "template.md"
+        if file_path.name.lower() not in ("template.md", "readme.md")
     ]
     file_stems = {file_path.stem for file_path in essence_files}
 

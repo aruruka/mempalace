@@ -15,14 +15,22 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from mempalace.models import KIND_DECISION, KIND_SESSION, KIND_TOOL, KIND_WISDOM
+from mempalace.models import (
+    ACTIVE_STATUSES,
+    KIND_DECISION,
+    KIND_SESSION,
+    KIND_TOOL,
+    KIND_WISDOM,
+    SweepReport,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sessions (
     session_id TEXT PRIMARY KEY,
     timestamp TEXT,
     summary TEXT,
-    tags TEXT
+    tags TEXT,
+    status TEXT DEFAULT 'active'
 );
 
 CREATE TABLE IF NOT EXISTS wisdom (
@@ -32,13 +40,15 @@ CREATE TABLE IF NOT EXISTS wisdom (
     content TEXT NOT NULL,
     timestamp TEXT,
     source_path TEXT,
-    source_session TEXT
+    source_session TEXT,
+    status TEXT DEFAULT 'active'
 );
 
 CREATE TABLE IF NOT EXISTS tool_registry (
     name TEXT PRIMARY KEY,
     path TEXT,
-    description TEXT
+    description TEXT,
+    status TEXT DEFAULT 'active'
 );
 
 CREATE TABLE IF NOT EXISTS decisions (
@@ -63,7 +73,19 @@ def connect(db_path: str | Path) -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     if text_path != ":memory:":
         conn.execute("PRAGMA journal_mode = WAL")
+    ensure_status_columns(conn)
     return conn
+
+
+def ensure_status_columns(conn: sqlite3.Connection) -> None:
+    """Idempotently add the status column to existing v2 tables if missing."""
+    existing_tables = set(table_names(conn))
+    for tbl in ("sessions", "wisdom", "tool_registry", "search_docs"):
+        if tbl not in existing_tables:
+            continue
+        cols = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({tbl})").fetchall()}
+        if "status" not in cols:
+            conn.execute(f"ALTER TABLE {tbl} ADD COLUMN status TEXT DEFAULT 'active'")
 
 
 def init_db(conn: sqlite3.Connection) -> None:
@@ -80,7 +102,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             source_ref TEXT NOT NULL,
             title TEXT NOT NULL,
             body TEXT NOT NULL,
-            category TEXT
+            category TEXT,
+            status TEXT DEFAULT 'active'
         );
         CREATE VIRTUAL TABLE IF NOT EXISTS search_docs_fts
             USING fts5(title, body, tokenize='porter');
@@ -91,6 +114,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    ensure_status_columns(conn)
     conn.commit()
     # Optional sqlite-vec acceleration (L2 upgrade path): created only when the
     # loadable extension is available; numpy brute-force remains the fallback.
@@ -150,6 +174,14 @@ def _delete_vec_row(conn: sqlite3.Connection, doc_id: int) -> None:
         return
 
 
+def _norm_status(raw: object) -> str:
+    """Normalize a stored status string, defaulting to 'active'."""
+    if raw is None:
+        return "active"
+    val = str(raw).strip().lower()
+    return val if val else "active"
+
+
 def sync_search_index(conn: sqlite3.Connection) -> int:
     """Synchronize the unified search index with the four source tables.
 
@@ -157,43 +189,52 @@ def sync_search_index(conn: sqlite3.Connection) -> int:
     by stable identity ``(source_kind, source_ref)``, unchanged documents keep
     their ``doc_id`` (so their embeddings survive), changed documents are
     updated in place and their vectors invalidated, new documents are inserted,
-    and stale documents (with their vectors) are removed.
+    and stale documents (with their vectors) are removed. Non-active documents
+    have their dense vectors immediately evicted to prevent Zombie Context Poisoning.
 
     Returns the number of documents present after the sync.
     """
     existing_rows = conn.execute(
-        "SELECT doc_id, source_kind, source_ref, title, body, category FROM search_docs"
+        "SELECT doc_id, source_kind, source_ref, title, body, category, status FROM search_docs"
     ).fetchall()
-    existing: dict[tuple[str, str], tuple[int, str, str, str | None]] = {}
+    existing: dict[tuple[str, str], tuple[int, str, str, str | None, str]] = {}
     for row in existing_rows:
         existing[(str(row["source_kind"]), str(row["source_ref"]))] = (
             int(row["doc_id"]),
             str(row["title"]),
             str(row["body"]),
             None if row["category"] is None else str(row["category"]),
+            _norm_status(row["status"]),
         )
 
-    rows: list[tuple[str, str, str, str, str | None]] = []
+    rows: list[tuple[str, str, str, str, str | None, str]] = []
 
-    for row in conn.execute("SELECT slug, category, content FROM wisdom ORDER BY id"):
+    for row in conn.execute("SELECT slug, category, content, status FROM wisdom ORDER BY id"):
         slug = str(row["slug"])
         content = str(row["content"])
         category = None if row["category"] is None else str(row["category"])
-        rows.append((KIND_WISDOM, slug, slug, content, category))
+        status = _norm_status(row["status"])
+        rows.append((KIND_WISDOM, slug, slug, content, category, status))
 
-    for row in conn.execute("SELECT session_id, summary, tags FROM sessions ORDER BY session_id"):
+    for row in conn.execute(
+        "SELECT session_id, summary, tags, status FROM sessions ORDER BY session_id"
+    ):
         session_id = str(row["session_id"])
         summary = "" if row["summary"] is None else str(row["summary"])
         tags = _join_tags(row["tags"])
+        status = _norm_status(row["status"])
         body = f"{summary} {tags} {session_id}".strip()
-        rows.append((KIND_SESSION, session_id, session_id, body, None))
+        rows.append((KIND_SESSION, session_id, session_id, body, None, status))
 
-    for row in conn.execute("SELECT name, path, description FROM tool_registry ORDER BY name"):
+    for row in conn.execute(
+        "SELECT name, path, description, status FROM tool_registry ORDER BY name"
+    ):
         name = str(row["name"])
         path = "" if row["path"] is None else str(row["path"])
         description = "" if row["description"] is None else str(row["description"])
+        status = _norm_status(row["status"])
         body = f"{name} {path} {description}".strip()
-        rows.append((KIND_TOOL, name, name, body, None))
+        rows.append((KIND_TOOL, name, name, body, None, status))
 
     for row in conn.execute(
         "SELECT id, title, path, status, date, tags FROM decisions ORDER BY id"
@@ -201,40 +242,50 @@ def sync_search_index(conn: sqlite3.Connection) -> int:
         decision_id = str(row["id"])
         title = "" if row["title"] is None else str(row["title"])
         path = "" if row["path"] is None else str(row["path"])
-        status = "" if row["status"] is None else str(row["status"])
+        status = _norm_status(row["status"])
         date = "" if row["date"] is None else str(row["date"])
         tags = _join_tags(row["tags"])
         body = f"{title} {path} {status} {date} {tags}".strip()
-        rows.append((KIND_DECISION, decision_id, f"{decision_id} {title}".strip(), body, None))
+        rows.append(
+            (KIND_DECISION, decision_id, f"{decision_id} {title}".strip(), body, None, status)
+        )
 
     desired_keys: set[tuple[str, str]] = set()
-    for kind, ref, title, body, category in rows:
+    for kind, ref, title, body, category, status in rows:
         key = (kind, ref)
         desired_keys.add(key)
         prior = existing.get(key)
         if prior is None:
             cursor = conn.execute(
-                "INSERT INTO search_docs (source_kind, source_ref, title, body, category) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (kind, ref, title, body, category),
+                "INSERT INTO search_docs (source_kind, source_ref, title, body, category, status) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (kind, ref, title, body, category, status),
             )
+            doc_id = int(cursor.lastrowid or 0)
             conn.execute(
                 "INSERT INTO search_docs_fts (rowid, title, body) VALUES (?, ?, ?)",
-                (cursor.lastrowid, title, body),
+                (doc_id, title, body),
             )
         else:
-            doc_id, old_title, old_body, old_category = prior
-            if (old_title, old_body, old_category) != (title, body, category):
+            doc_id, old_title, old_body, old_category, old_status = prior
+            changed = (old_title, old_body, old_category, old_status) != (
+                title,
+                body,
+                category,
+                status,
+            )
+            if changed:
                 conn.execute(
-                    "UPDATE search_docs SET title = ?, body = ?, category = ? WHERE doc_id = ?",
-                    (title, body, category, doc_id),
+                    "UPDATE search_docs SET title = ?, body = ?, category = ?, status = ? "
+                    "WHERE doc_id = ?",
+                    (title, body, category, status, doc_id),
                 )
                 conn.execute("DELETE FROM search_docs_fts WHERE rowid = ?", (doc_id,))
                 conn.execute(
                     "INSERT INTO search_docs_fts (rowid, title, body) VALUES (?, ?, ?)",
                     (doc_id, title, body),
                 )
-                # Content changed: invalidate embeddings so `embed` recomputes them.
+            if changed or status not in ACTIVE_STATUSES:
                 conn.execute("DELETE FROM doc_vectors WHERE doc_id = ?", (doc_id,))
                 _delete_vec_row(conn, doc_id)
 
@@ -248,6 +299,44 @@ def sync_search_index(conn: sqlite3.Connection) -> int:
 
     conn.commit()
     return len(rows)
+
+
+def count_stale_docs(conn: sqlite3.Connection) -> int:
+    """Return the count of non-active (superseded, deprecated, archived, removed) documents."""
+    placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
+    sql = (
+        f"SELECT COUNT(*) FROM search_docs WHERE COALESCE(status, 'active') NOT IN ({placeholders})"
+    )
+    row = conn.execute(sql, ACTIVE_STATUSES).fetchone()
+    return int(row[0]) if row is not None else 0
+
+
+def run_hygiene_sweep(conn: sqlite3.Connection) -> SweepReport:
+    """Evict dense vectors for non-active documents and optimize the FTS5 index."""
+    placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
+    sql = f"SELECT doc_id FROM search_docs WHERE COALESCE(status, 'active') NOT IN ({placeholders})"
+    non_active_rows = conn.execute(sql, ACTIVE_STATUSES).fetchall()
+    non_active_ids = [int(r[0]) for r in non_active_rows]
+
+    evicted = 0
+    for doc_id in non_active_ids:
+        cur = conn.execute("DELETE FROM doc_vectors WHERE doc_id = ?", (doc_id,))
+        evicted += int(cur.rowcount or 0)
+        _delete_vec_row(conn, doc_id)
+
+    fts_ok = False
+    try:
+        conn.execute("INSERT INTO search_docs_fts(search_docs_fts) VALUES('optimize')")
+        fts_ok = True
+    except sqlite3.Error:
+        fts_ok = False
+
+    conn.commit()
+    return SweepReport(
+        stale_docs=len(non_active_ids),
+        vectors_evicted=evicted,
+        fts_optimized=fts_ok,
+    )
 
 
 def _join_tags(raw: object) -> str:

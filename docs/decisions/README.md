@@ -14,9 +14,11 @@ Decisions follow the format defined in [template.md](template.md).
 ---
 
 ## Status Definitions
+- `draft`: Initial work-in-progress draft.
 - `proposed`: Under discussion or prototyping.
-- `active`: In effect and binding for current architecture.
-- `superseded`: Replaced by a subsequent decision (see link in record).
-- `deprecated`: No longer applicable.
-- `rejected`: Evaluated but not adopted.
+- `active` / `accepted`: In effect and binding for current architecture (indexed in default search).
+- `superseded`: Replaced by a subsequent decision (requires bidirectional `Supersedes:` / `Superseded-by:` headers; excluded from default search).
+- `deprecated`: No longer applicable (excluded from default search).
+- `rejected`: Evaluated but not adopted (excluded from default search).
+
 

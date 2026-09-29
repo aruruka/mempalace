@@ -98,15 +98,27 @@ agentCard:
   - Run `uv run ruff check . && uv run ruff format --check .`
   - Run `uv run pyright` (strict checking for `src/mempalace/`)
   - Run `uv run pytest` (BDD contract, in-memory, black-box CLI tests)
-- **Data Model & Policy**:
-  - Essence markdown files (`MemPalace/essences/*.md`) and ADRs (`docs/decisions/*.md`) are the **single source of truth**.
-  - The SQLite database (`MemPalace/memory.sqlite`) is a derived, rebuildable index generated via `uv run python -m mempalace ingest`.
-  - **English-Only**: All essence content and documentation must be English-only.
-- **Architecture Decisions (ADRs)**:
-  - Stored in `docs/decisions/`.
-  - Use `docs/decisions/template.md`. Supersede old decisions with new ADRs (no history rewrites).
-  - Register decisions into MemPalace with `uv run python -m mempalace register-decisions`.
+- **Unified 4-Entity Memory Model & Policy**:
+  1. **Semantic Memory (`MemPalace/essences/*.md` -> `wisdom`)**:
+     - Single source of truth for pitfalls, preferences, and thinking styles (`English-only`).
+     - **Deterministic Qualification Gate**: Propose candidates only when Tooling Invisibility $I \ge 2$, Blast Radius $B \ge 2$, and Composite Score $S = 0.35B + 0.30R + 0.20P + 0.15I \ge 3.2$.
+  2. **Architectural Memory (`docs/decisions/ADR-NNN-*.md` -> `decisions`)**:
+     - Use `docs/decisions/template.md` for Type 1 irreversible architectural decisions.
+     - Valid statuses: `draft`, `proposed`, `active`, `accepted`, `rejected`, `deprecated`, `superseded`.
+     - Supersede old decisions bidirectionally (`Supersedes: ADR-NNN` and `Superseded-by: ADR-MMM`) without rewriting history.
+     - Register with `uv run python -m mempalace register-decisions`.
+  3. **Episodic Memory (`MemPalace/sessions.jsonl` -> `sessions`)**:
+     - At task/session closure, record a condensed session summary via `uv run python -m mempalace sync --id "<session-id>" --summary "<summary>" --tags "<tags>"`.
+     - Appends/updates `MemPalace/sessions.jsonl` so episodic history survives `memory.sqlite` rebuilds.
+  4. **Procedural Memory (`tools/<subdir>/`, `scripts/*` -> `tool_registry`)**:
+     - Before writing a new utility script, search registered tools: `uv run python -m mempalace search --source tool "<capability>"`.
+     - Register cohesive tool directories (`tools/<subdir>/`) and standalone scripts (`scripts/*.{py,ps1,sh}`) with `uv run python -m mempalace register-tools`.
+  - **Derived Index & Hygiene Sweeps**:
+    - `MemPalace/memory.sqlite` is rebuilt from source files via `uv run python -m mempalace ingest`.
+    - Default `mempalace search` returns only active records (`active`/`accepted`); pass `--include-archived` for historical/superseded items.
+    - When `mempalace doctor` warns that non-active records reached the threshold ($\ge 20$), run `uv run python -m mempalace sweep` to evict stale vectors and optimize FTS5.
 - **Harness & A2A Collaboration**:
   - Follow A2A Task Object conventions in `docs/harness-playbook/`.
   - Reversible, scoped improvements with explicit acceptance checklists.
+
 

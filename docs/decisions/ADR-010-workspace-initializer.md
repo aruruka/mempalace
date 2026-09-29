@@ -4,6 +4,8 @@ Date: 2026-09-06
 Status: active
 Tags: onboarding, cli, initializer, scaffolding, agent-card, bdd
 Deciders: aruruka, antigravity
+Supersedes: None
+Superseded-by: None
 
 ## Context
 MemPalace v2 is designed as an embedded memory engine that gives coding agents durable,

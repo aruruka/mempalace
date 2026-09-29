@@ -14,6 +14,18 @@ KIND_TOOL = "tool"
 KIND_DECISION = "decision"
 
 CATEGORY_VALUES = ("preference", "pitfall", "thinking_style")
+ACTIVE_STATUSES = ("active", "accepted")
+VALID_STATUSES = (
+    "active",
+    "accepted",
+    "proposed",
+    "draft",
+    "deprecated",
+    "superseded",
+    "rejected",
+    "archived",
+    "removed",
+)
 
 
 def _empty_hits() -> list[SearchHit]:
@@ -34,6 +46,7 @@ class Essence:
     path: Path
     category: str | None
     content: str
+    status: str = "active"
 
 
 @dataclass(frozen=True)
@@ -48,6 +61,7 @@ class SearchHit:
     body: str
     category: str | None = None
     doc_id: int = -1
+    status: str = "active"
 
     def to_dict(self) -> dict[str, object]:
         """Serialize to a JSON-friendly mapping (internal doc_id omitted)."""
@@ -58,6 +72,7 @@ class SearchHit:
             "source_ref": self.source_ref,
             "title": self.title,
             "category": self.category,
+            "status": self.status,
             "body": self.body,
         }
 
@@ -139,6 +154,23 @@ class IngestReport:
             "sessions_migrated": self.sessions_migrated,
             "tools_upserted": self.tools_upserted,
             "docs_indexed": self.docs_indexed,
+        }
+
+
+@dataclass(frozen=True)
+class SweepReport:
+    """Summary produced by a batched hygiene sweep."""
+
+    stale_docs: int
+    vectors_evicted: int
+    fts_optimized: bool
+
+    def to_dict(self) -> dict[str, object]:
+        """Serialize to a JSON-friendly mapping."""
+        return {
+            "stale_docs": self.stale_docs,
+            "vectors_evicted": self.vectors_evicted,
+            "fts_optimized": self.fts_optimized,
         }
 
 

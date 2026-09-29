@@ -3,6 +3,9 @@
 Date: 2026-09-03
 Status: active
 Tags: memory, retrieval, sqlite, fts5, embeddings, hybrid
+Deciders: aruruka, antigravity
+Supersedes: ADR-002
+Superseded-by: None
 
 ## Context
 MemPalace v1 (ADR-002: DuckDB storage) ships ILIKE-only substring search: no ranking, no

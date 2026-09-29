@@ -26,29 +26,32 @@ It combines ADR best practices with repository-specific governance and tooling.
 
 ## ADR Lifecycle
 Use one status per ADR:
-- `proposed`: Under discussion.
-- `active`: Accepted and in force.
-- `rejected`: Considered but not adopted.
-- `deprecated`: No longer relevant.
-- `superseded`: Replaced by another ADR.
+- `draft`: Initial work-in-progress draft.
+- `proposed`: Under discussion and review.
+- `active` / `accepted`: Approved and currently in force (indexed for default `mempalace search`).
+- `rejected`: Considered but not adopted (excluded from default search; visible with `--include-archived`).
+- `deprecated`: Retired and no longer applicable (excluded from default search).
+- `superseded`: Replaced by a newer ADR (excluded from default search).
 
 ## Execution Rules
 1. **Before deciding**:
    - Query existing memory first: `uv run python -m mempalace search --mode hybrid "<keywords>"`
+   - Check historical/superseded decisions if needed: `uv run python -m mempalace search --include-archived "<keywords>"`
    - Check `docs/decisions/` for related ADRs.
 2. **ADR format**:
    - Path: `docs/decisions/ADR-NNN-short-slug.md`
    - Use `docs/decisions/template.md`.
-   - Metadata: Date, Status, Tags, Deciders.
+   - Metadata headers: `Date`, `Status`, `Tags`, `Deciders`, `Supersedes`, `Superseded-by`.
    - Required sections: Context, Decision Drivers, Options Considered, Decision, Rationale, Consequences, Related Decisions, Supersession.
-3. **Status policy**:
-   - Use `active` for current decisions.
-   - If replaced, create a new ADR and mark old ADR as `superseded`.
+3. **Status & Bidirectional Supersession Policy**:
+   - Use `active` (or `accepted`) for current binding decisions.
+   - If replaced, create a new ADR with `Supersedes: ADR-NNN` and mark the old ADR with `Status: superseded` and `Superseded-by: ADR-MMM`.
    - Do not rewrite history in old ADRs except status and supersession link updates.
 4. **MemPalace registration**:
-   - Register decisions into SQLite memory store:
+   - Register decisions into SQLite memory store (automatically evicting vectors for superseded/deprecated ADRs):
      ```bash
      uv run python -m mempalace register-decisions
      ```
    - Update `docs/decisions/README.md` index.
+
 

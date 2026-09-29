@@ -20,7 +20,7 @@ import numpy as np
 from mempalace import storage
 from mempalace.config import RRF_K
 from mempalace.embeddings import Embedder, EmbeddingError
-from mempalace.models import SearchHit, SearchResult
+from mempalace.models import ACTIVE_STATUSES, SearchHit, SearchResult
 
 _STOPWORDS = frozenset(
     """a an and are as at be but by for from how in is it its of on or that the this
@@ -45,6 +45,7 @@ class _Doc:
     title: str
     body: str
     category: str | None
+    status: str = "active"
 
 
 def _query_tokens(query: str) -> list[str]:
@@ -80,12 +81,18 @@ def _fetch_docs(
     conn: sqlite3.Connection,
     source_kind: str | None = None,
     category: str | None = None,
+    include_archived: bool = False,
 ) -> list[_Doc]:
-    """Fetch search documents, optionally filtered by kind/category."""
+    """Fetch search documents, optionally filtered by kind/category/active status."""
     sql = (
-        "SELECT doc_id, source_kind, source_ref, title, body, category FROM search_docs WHERE 1 = 1"
+        "SELECT doc_id, source_kind, source_ref, title, body, category, "
+        "COALESCE(status, 'active') AS status FROM search_docs WHERE 1 = 1"
     )
     params: list[object] = []
+    if not include_archived:
+        placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
+        sql += f" AND COALESCE(status, 'active') IN ({placeholders})"
+        params.extend(ACTIVE_STATUSES)
     if source_kind:
         sql += " AND source_kind = ?"
         params.append(source_kind)
@@ -103,6 +110,7 @@ def _fetch_docs(
                 title=str(row["title"]),
                 body=str(row["body"]),
                 category=None if row["category"] is None else str(row["category"]),
+                status=str(row["status"]),
             )
         )
     return docs
@@ -124,6 +132,7 @@ def _to_hits(docs: list[_Doc], scores: list[float], limit: int) -> list[SearchHi
                 body=doc.body,
                 category=doc.category,
                 doc_id=doc.doc_id,
+                status=doc.status,
             )
         )
     return hits
@@ -135,16 +144,22 @@ def _bm25_search(
     limit: int,
     source_kind: str | None,
     category: str | None,
+    include_archived: bool = False,
 ) -> list[SearchHit]:
     """Run one BM25 FTS query (AND or OR expression) with optional filters."""
     sql = (
         "SELECT d.doc_id, d.source_kind, d.source_ref, d.title, d.body, d.category, "
+        "COALESCE(d.status, 'active') AS status, "
         "-bm25(search_docs_fts) AS score "
         "FROM search_docs_fts "
         "JOIN search_docs d ON d.doc_id = search_docs_fts.rowid "
         "WHERE search_docs_fts MATCH ?"
     )
     params: list[object] = [fts_expr]
+    if not include_archived:
+        placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
+        sql += f" AND COALESCE(d.status, 'active') IN ({placeholders})"
+        params.extend(ACTIVE_STATUSES)
     if source_kind:
         sql += " AND d.source_kind = ?"
         params.append(source_kind)
@@ -166,6 +181,7 @@ def _bm25_search(
                 body=str(row["body"]),
                 category=None if row["category"] is None else str(row["category"]),
                 doc_id=int(row["doc_id"]),
+                status=str(row["status"]),
             )
         )
     return hits
@@ -177,6 +193,7 @@ def search_bm25(
     limit: int,
     source_kind: str | None = None,
     category: str | None = None,
+    include_archived: bool = False,
 ) -> list[SearchHit]:
     """L1: BM25-ranked FTS5 search with AND semantics.
 
@@ -187,13 +204,13 @@ def search_bm25(
     and_expr = fts_query(query)
     if not and_expr:
         return []
-    and_hits = _bm25_search(conn, and_expr, limit, source_kind, category)
+    and_hits = _bm25_search(conn, and_expr, limit, source_kind, category, include_archived)
     if and_hits:
         return and_hits
     or_expr = _or_query(query)
     if or_expr == and_expr:
         return []
-    return _bm25_search(conn, or_expr, limit, source_kind, category)
+    return _bm25_search(conn, or_expr, limit, source_kind, category, include_archived)
 
 
 def _vector_arrays(conn: sqlite3.Connection) -> tuple[list[int], np.ndarray]:
@@ -213,15 +230,19 @@ def _vector_count(conn: sqlite3.Connection) -> int:
 
 
 def _doc_count(conn: sqlite3.Connection) -> int:
-    """Return the number of search documents."""
-    row = conn.execute("SELECT COUNT(*) FROM search_docs").fetchone()
+    """Return the number of active search documents."""
+    placeholders = ", ".join("?" for _ in ACTIVE_STATUSES)
+    row = conn.execute(
+        f"SELECT COUNT(*) FROM search_docs WHERE COALESCE(status, 'active') IN ({placeholders})",
+        ACTIVE_STATUSES,
+    ).fetchone()
     return int(row[0]) if row is not None else 0
 
 
 def ensure_vectors(conn: sqlite3.Connection, embedder: Embedder) -> int:
-    """Embed and persist vectors for documents that have none; returns count added."""
+    """Embed and persist vectors for active documents that have none; returns count added."""
     existing = {int(row[0]) for row in conn.execute("SELECT doc_id FROM doc_vectors").fetchall()}
-    docs = [doc for doc in _fetch_docs(conn) if doc.doc_id not in existing]
+    docs = [doc for doc in _fetch_docs(conn, include_archived=False) if doc.doc_id not in existing]
     if not docs:
         return 0
     texts = [f"{doc.title} {doc.body}" for doc in docs]
@@ -317,11 +338,12 @@ def search_dense(
     limit: int,
     source_kind: str | None = None,
     category: str | None = None,
+    include_archived: bool = False,
 ) -> list[SearchHit]:
     """L2: cosine search over persisted embeddings (never auto-embeds)."""
     if _vector_count(conn) == 0:
         raise EmbeddingError("no stored vectors; run 'mempalace embed' first")
-    docs = _fetch_docs(conn, source_kind, category)
+    docs = _fetch_docs(conn, source_kind, category, include_archived=include_archived)
     if not docs:
         return []
     scores = _dense_scores(conn, embedder, query)
@@ -360,6 +382,7 @@ def _rrf_fuse(
                 body=source.body,
                 category=source.category,
                 doc_id=doc_id,
+                status=source.status,
             )
         )
     return hits
@@ -373,6 +396,7 @@ def search(
     source_kind: str | None = None,
     category: str | None = None,
     embedder: Embedder | None = None,
+    include_archived: bool = False,
 ) -> SearchResult:
     """Top-level retrieval entry point with graceful embedding fallback.
 
@@ -383,14 +407,24 @@ def search(
     if mode not in VALID_MODES:
         raise ValueError(f"unknown mode {mode!r}; expected one of {VALID_MODES}")
     pool = max(limit * 4, limit)
-    bm25_hits = search_bm25(conn, query, pool, source_kind, category)
+    bm25_hits = search_bm25(
+        conn, query, pool, source_kind, category, include_archived=include_archived
+    )
     note: str | None = None
 
     if mode == MODE_BM25 or embedder is None:
         return SearchResult(query=query, mode=MODE_BM25, hits=bm25_hits[:limit])
 
     try:
-        dense_hits = search_dense(conn, embedder, query, pool, source_kind, category)
+        dense_hits = search_dense(
+            conn,
+            embedder,
+            query,
+            pool,
+            source_kind,
+            category,
+            include_archived=include_archived,
+        )
     except EmbeddingError as exc:
         note = f"dense unavailable ({exc}); fell back to bm25"
         return SearchResult(query=query, mode=MODE_BM25, hits=bm25_hits[:limit], note=note)
