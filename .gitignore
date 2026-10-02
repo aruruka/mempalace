@@ -27,3 +27,8 @@ reasonix.toml
 # Workspace update cache
 MemPalace/.cache.json
 .cache.json
+
+# Personal / Global agent skills junctions
+.agents/skills/ponytail*
+.agents/skills/agent-skills-*
+

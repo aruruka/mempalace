@@ -491,7 +491,7 @@ def test_two_tier_retrieval_and_vector_eviction(ingested: Path, workspace: Path)
 
 def test_duckdb_migration_with_existing_jsonl_and_rebuild_durability(tmp_path: Path) -> None:
     """Legacy DuckDB sessions/tools migrate even when sessions.jsonl is non-empty and survive rebuilds."""
-    import duckdb
+    duckdb = pytest.importorskip("duckdb")
 
     from mempalace.config import legacy_duckdb_path
 

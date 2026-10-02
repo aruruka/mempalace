@@ -105,20 +105,25 @@ agentCard:
   2. **Architectural Memory (`docs/decisions/ADR-NNN-*.md` -> `decisions`)**:
      - Use `docs/decisions/template.md` for Type 1 irreversible architectural decisions.
      - Valid statuses: `draft`, `proposed`, `active`, `accepted`, `rejected`, `deprecated`, `superseded`.
-     - Supersede old decisions bidirectionally (`Supersedes: ADR-NNN` and `Superseded-by: ADR-MMM`) without rewriting history.
-     - Register with `uv run python -m mempalace register-decisions`.
+     - **ADR-002 Governance & Supersession Rules**:
+       - Supersede old decisions bidirectionally without rewriting history (e.g. ADR-002 DuckDB is marked `superseded` with `Superseded-by: ADR-009`, while ADR-009 has `Supersedes: ADR-002`).
+       - Bidirectional consistency and schema validity are enforced via `uv run python scripts/validate_governance.py`.
+       - Superseded records (such as ADR-002) are excluded from default retrieval but remain discoverable with `--include-archived`.
+     - Register decisions with `uv run python -m mempalace register-decisions` or `uv run mempalace ingest`.
   3. **Episodic Memory (`MemPalace/sessions.jsonl` -> `sessions`)**:
      - At task/session closure, record a condensed session summary via `uv run python -m mempalace sync --id "<session-id>" --summary "<summary>" --tags "<tags>"`.
      - Appends/updates `MemPalace/sessions.jsonl` so episodic history survives `memory.sqlite` rebuilds.
   4. **Procedural Memory (`tools/<subdir>/`, `scripts/*` -> `tool_registry`)**:
      - Before writing a new utility script, search registered tools: `uv run python -m mempalace search --source tool "<capability>"`.
-     - Register cohesive tool directories (`tools/<subdir>/`) and standalone scripts (`scripts/*.{py,ps1,sh}`) with `uv run python -m mempalace register-tools`.
-  - **Derived Index & Hygiene Sweeps**:
-    - `MemPalace/memory.sqlite` is rebuilt from source files via `uv run python -m mempalace ingest`.
-    - Default `mempalace search` returns only active records (`active`/`accepted`); pass `--include-archived` for historical/superseded items.
-    - When `mempalace doctor` warns that non-active records reached the threshold ($\ge 20$), run `uv run python -m mempalace sweep` to evict stale vectors and optimize FTS5.
+     - Register cohesive tool directories (`tools/<subdir>/`) and standalone scripts (`scripts/*.{py,ps1,sh}`) with `uv run python -m mempalace register-tools` or `uv run mempalace ingest`.
+  - **Derived Index, Doctor & Hygiene Sweeps**:
+     - `MemPalace/memory.sqlite` is rebuilt from source files via `uv run python -m mempalace ingest`.
+     - Run `uv run mempalace doctor --human` (or `mempalace doctor`) to inspect vector synchronization, schema integrity, and stale entry counts.
+     - Default `mempalace search` returns only active records (`active`/`accepted`); pass `--include-archived` for historical/superseded items.
+     - When `mempalace doctor` warns that non-active records reached the threshold ($\ge 20$), run `uv run python -m mempalace sweep` to evict stale vectors and optimize FTS5.
 - **Harness & A2A Collaboration**:
   - Follow A2A Task Object conventions in `docs/harness-playbook/`.
   - Reversible, scoped improvements with explicit acceptance checklists.
+
 
 
